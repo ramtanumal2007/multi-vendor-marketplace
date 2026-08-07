@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: #FFFFFF;
+    --background-secondary: #F8FAFC;
+    --foreground: #0F172A;
+    --foreground-secondary: #475569;
+    --accent: #4F46E5; /* Indigo 600 */
+    --accent-hover: #4338CA;
+    --secondary-accent: #EA580C; /* Orange 600 */
+    --destructive: #EF4444;
+    --success: #10B981;
+    --card-bg: #FFFFFF;
+    --border: #E2E8F0;
+    
+    /* Marketplace Specific Colors */
+    --brand-grocery: #16A34A;
+    --brand-fashion: #DB2777;
+    --brand-electronics: #2563EB;
+  }
+
+  .dark {
+    --background: #09090B;
+    --background-secondary: #121214;
+    --foreground: #FAFAFA;
+    --foreground-secondary: #A1A1AA;
+    --accent: #6366F1; /* Indigo 500 */
+    --accent-hover: #818CF8;
+    --secondary-accent: #F97316; /* Orange 500 */
+    --destructive: #F87171;
+    --success: #34D399;
+    --card-bg: #18181B;
+    --border: #27272A;
+    
+    /* Marketplace Specific Colors */
+    --brand-grocery: #4ADE80;
+    --brand-fashion: #F472B6;
+    --brand-electronics: #60A5FA;
+  }
+}
+
+/* Dark mode default styling */
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-playfair), serif;
+  line-height: 1.2;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}

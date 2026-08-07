@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import { FileCheck, Loader2 } from "lucide-react";
 import { generatePdfCertificate } from "@/lib/pdfCertificate";
 
+import { createClient } from "@/lib/supabase";
+
 interface DownloadCertificateButtonProps {
   sellerIdCode: string;
   storeName: string;
@@ -11,6 +13,8 @@ interface DownloadCertificateButtonProps {
   contactName?: string;
   approvalDate?: string;
   status?: string;
+  certificateNumber?: string;
+  verificationId?: string;
   variant?: "primary" | "secondary" | "outline";
   className?: string;
 }
@@ -22,14 +26,46 @@ export function DownloadCertificateButton({
   contactName = "",
   approvalDate = "",
   status = "approved",
+  certificateNumber,
+  verificationId,
   variant = "primary",
   className = "",
 }: DownloadCertificateButtonProps) {
   const [isGenerating, setIsGenerating] = useState(false);
+  const supabase = createClient();
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     setIsGenerating(true);
     try {
+      let finalCertNumber = certificateNumber;
+      let finalVerId = verificationId;
+
+      if (!finalCertNumber || !finalVerId) {
+        const { data: certData } = await supabase.rpc("get_seller_certificate", {
+          p_seller_id: (await supabase.auth.getUser()).data.user?.id
+        });
+
+        if (certData && certData.length > 0) {
+          finalCertNumber = certData[0].certificate_number;
+          finalVerId = certData[0].verification_id;
+        } else {
+          // Fallback direct table query if RPC not executed yet
+          const { data: user } = await supabase.auth.getUser();
+          if (user.user) {
+            const { data: reg } = await supabase
+              .from("seller_certificate_registry")
+              .select("certificate_number, verification_id")
+              .eq("seller_id", user.user.id)
+              .maybeSingle();
+
+            if (reg) {
+              finalCertNumber = reg.certificate_number;
+              finalVerId = reg.verification_id;
+            }
+          }
+        }
+      }
+
       const formattedDate = approvalDate 
         ? new Date(approvalDate).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
         : new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
@@ -42,11 +78,13 @@ export function DownloadCertificateButton({
         issueDate: formattedDate,
         validSince: formattedDate,
         status: status,
+        certificateNumber: finalCertNumber,
+        verificationId: finalVerId,
       });
     } catch (err) {
       console.error("Certificate generation error:", err);
     } finally {
-      setTimeout(() => setIsGenerating(false), 1000);
+      setTimeout(() => setIsGenerating(false), 500);
     }
   };
 

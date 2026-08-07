@@ -12,7 +12,8 @@ interface QuickActionCardsProps {
 }
 
 export function QuickActionCards({ sellerProfile, store, productCount }: QuickActionCardsProps) {
-  const isLimitReached = sellerProfile?.membership_plan === "BASIC" && productCount >= 10;
+  const maxLimit = typeof sellerProfile?.max_products === "number" ? sellerProfile.max_products : 10;
+  const isLimitReached = (sellerProfile?.membership_plan || "BASIC") === "BASIC" && productCount >= maxLimit;
 
   const actions = [
     {
@@ -22,7 +23,7 @@ export function QuickActionCards({ sellerProfile, store, productCount }: QuickAc
       href: "/seller/products/new",
       color: "bg-blue-500/10 text-blue-600 border-blue-200 hover:border-blue-400",
       disabled: isLimitReached,
-      disabledTooltip: "Product limit reached (10/10)",
+      disabledTooltip: `Product limit reached (${productCount}/${maxLimit})`,
     },
     {
       title: "Manage Orders",
@@ -103,12 +104,12 @@ export function QuickActionCards({ sellerProfile, store, productCount }: QuickAc
           </div>
           <div className="mt-4">
             <DownloadCertificateButton
-              sellerIdCode={sellerProfile?.seller_id_code}
-              storeName={store?.name}
-              businessName={sellerProfile?.business_name}
-              contactName={sellerProfile?.contact_name}
-              approvalDate={sellerProfile?.approved_at}
-              status={sellerProfile?.verification_status}
+              sellerIdCode={(sellerProfile?.seller_id_code as string) || "SLR-000000"}
+              storeName={(store?.name as string) || "Official Store"}
+              businessName={sellerProfile?.business_name as string | undefined}
+              contactName={sellerProfile?.contact_name as string | undefined}
+              approvalDate={sellerProfile?.approved_at as string | undefined}
+              status={sellerProfile?.verification_status as string | undefined}
               variant="outline"
               className="w-full text-xs"
             />

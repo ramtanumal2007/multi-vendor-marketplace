@@ -30,6 +30,15 @@ export function SellerApprovalModal({
   const supabase = createClient();
   const router = useRouter();
 
+  const handleClose = async () => {
+    try {
+      await supabase.rpc("acknowledge_seller_approval_modal");
+    } catch (err) {
+      console.error("Failed to acknowledge approval modal:", err);
+    }
+    onClose();
+  };
+
   const handleStartSelling = async () => {
     setIsAcknowledging(true);
     try {
@@ -48,7 +57,7 @@ export function SellerApprovalModal({
     : new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose}>
+    <Modal isOpen={isOpen} onClose={handleClose}>
       <div className="text-center py-2">
         <div className="w-16 h-16 bg-gradient-to-tr from-amber-500 to-yellow-300 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-amber-500/20">
           <Sparkles className="w-8 h-8 text-white" />

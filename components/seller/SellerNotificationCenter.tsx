@@ -8,8 +8,18 @@ interface SellerNotificationCenterProps {
   sellerId: string;
 }
 
+interface SellerNotification {
+  id: string;
+  title: string;
+  message: string;
+  type?: string;
+  priority?: string;
+  is_read?: boolean;
+  created_at: string;
+}
+
 export function SellerNotificationCenter({ sellerId }: SellerNotificationCenterProps) {
-  const [notifications, setNotifications] = useState<Array<Record<string, unknown>>>([]);
+  const [notifications, setNotifications] = useState<SellerNotification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const supabase = createClient();
@@ -17,17 +27,26 @@ export function SellerNotificationCenter({ sellerId }: SellerNotificationCenterP
   useEffect(() => {
     async function fetchNotifications() {
       if (!sellerId) return;
-      const { data, error } = await supabase
-        .from("seller_notifications")
-        .select("*")
-        .eq("seller_id", sellerId)
-        .order("created_at", { ascending: false })
-        .limit(10);
-
-      if (!error && data) {
-        setNotifications(data);
+      try {
+        const res = await fetch("/api/seller/notifications");
+        if (res.ok) {
+          const data = await res.json();
+          setNotifications(data.notifications || []);
+        } else {
+          // Fallback to direct client query
+          const { data: dbData } = await supabase
+            .from("seller_notifications")
+            .select("*")
+            .eq("seller_id", sellerId)
+            .order("created_at", { ascending: false })
+            .limit(15);
+          if (dbData) setNotifications(dbData);
+        }
+      } catch (err) {
+        console.error("Failed to load notifications:", err);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     }
     fetchNotifications();
   }, [sellerId]);
@@ -36,12 +55,28 @@ export function SellerNotificationCenter({ sellerId }: SellerNotificationCenterP
 
   const handleMarkAsRead = async (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-    await supabase.from("seller_notifications").update({ is_read: true }).eq("id", id);
+    try {
+      await fetch("/api/seller/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+    } catch {
+      await supabase.from("seller_notifications").update({ is_read: true }).eq("id", id);
+    }
   };
 
   const handleMarkAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    await supabase.from("seller_notifications").update({ is_read: true }).eq("seller_id", sellerId);
+    try {
+      await fetch("/api/seller/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ markAll: true }),
+      });
+    } catch {
+      await supabase.from("seller_notifications").update({ is_read: true }).eq("seller_id", sellerId);
+    }
   };
 
   const getPriorityBadge = (priority: string) => {
@@ -122,7 +157,7 @@ export function SellerNotificationCenter({ sellerId }: SellerNotificationCenterP
                     <div className="flex-1">
                       <div className="flex items-center justify-between">
                         <h4 className="text-xs font-bold text-slate-900">{item.title}</h4>
-                        {getPriorityBadge(item.priority)}
+                        {getPriorityBadge(item.priority || "medium")}
                       </div>
                       <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">{item.message}</p>
                       <span className="text-[10px] text-slate-400 mt-1 block">

@@ -6,12 +6,13 @@ export interface CertificateData {
   issueDate: string;
   validSince: string;
   status: string;
+  certificateNumber?: string;
+  verificationId?: string;
 }
 
 export function generatePdfCertificate(data: CertificateData) {
-  const certNumber = `CERT-${data.sellerIdCode || 'SLR-000000'}-${new Date().getFullYear()}`;
-  const verificationHash = Math.random().toString(36).substring(2, 10).toUpperCase();
-  const verificationId = `VER-${verificationHash}-X79`;
+  const certNumber = data.certificateNumber || `CERT-${data.sellerIdCode || 'SLR-000000'}-${new Date().getFullYear()}`;
+  const verificationId = data.verificationId || `VER-${data.sellerIdCode || 'VERIFIED'}`;
 
   const htmlContent = `
     <!DOCTYPE html>

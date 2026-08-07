@@ -5,6 +5,29 @@ import { DollarSign, ShoppingBag, Eye, TrendingUp, Wallet, Clock, Truck } from "
 import { formatCurrency } from "@/lib/utils";
 
 interface SellerAnalyticsWidgetProps {
+  summaryStats?: {
+    totalRevenue: number;
+    totalOrders: number;
+    conversionRate: number;
+    pendingPayout: number;
+    completedPayouts: number;
+  };
+  todayStats?: {
+    todaySales: number;
+    todayOrders: number;
+    todayVisitors: number;
+    pendingShipments: number;
+  };
+  weeklyStats?: {
+    weeklyRevenue: number;
+    weeklyOrders: number;
+    weeklyViews: number;
+  };
+  monthlyStats?: {
+    monthlyRevenue: number;
+    monthlyOrders: number;
+    monthlyViews: number;
+  };
   stats?: {
     totalRevenue?: number;
     totalOrders?: number;
@@ -19,45 +42,62 @@ interface SellerAnalyticsWidgetProps {
   };
 }
 
-export function SellerAnalyticsWidget({ stats }: SellerAnalyticsWidgetProps) {
+export function SellerAnalyticsWidget({
+  summaryStats,
+  todayStats,
+  weeklyStats,
+  monthlyStats,
+  stats,
+}: SellerAnalyticsWidgetProps) {
   const [timeframe, setTimeframe] = useState<"daily" | "weekly" | "monthly">("monthly");
 
-  const revenue = stats?.totalRevenue || 0;
-  const orders = stats?.totalOrders || 0;
-  const views = stats?.catalogViews || 128;
-  const conversion = stats?.conversionRate || (orders > 0 ? ((orders / views) * 100).toFixed(1) : "0.0");
-  const pendingPayout = stats?.pendingPayout || 0;
-  const completedPayouts = stats?.completedPayouts || 0;
+  const revenue = summaryStats?.totalRevenue ?? stats?.totalRevenue ?? 0;
+  const pendingPayout = summaryStats?.pendingPayout ?? stats?.pendingPayout ?? 0;
+  const completedPayouts = summaryStats?.completedPayouts ?? stats?.completedPayouts ?? 0;
+  const conversion = summaryStats?.conversionRate ?? stats?.conversionRate ?? 0;
 
-  const todaySales = stats?.todaySales || 0;
-  const todayOrders = stats?.todayOrders || 0;
-  const todayVisitors = stats?.todayVisitors || 24;
-  const pendingShipments = stats?.pendingShipments || 0;
+  const todaySales = todayStats?.todaySales ?? stats?.todaySales ?? 0;
+  const todayOrders = todayStats?.todayOrders ?? stats?.todayOrders ?? 0;
+  const todayVisitors = todayStats?.todayVisitors ?? stats?.todayVisitors ?? 0;
+  const pendingShipments = todayStats?.pendingShipments ?? stats?.pendingShipments ?? 0;
 
-  // Timeframe adjustments
-  const timeframeMultiplier = timeframe === "daily" ? 0.05 : timeframe === "weekly" ? 0.25 : 1;
-  const displayRevenue = formatCurrency(revenue * timeframeMultiplier);
-  const displayOrders = Math.round(orders * timeframeMultiplier);
-  const displayViews = Math.round(views * timeframeMultiplier);
+  // Active Timeframe values derived from dedicated RPCs/queries
+  let displayRevenueVal = revenue;
+  let displayOrdersVal = summaryStats?.totalOrders ?? stats?.totalOrders ?? 0;
+  let displayViewsVal = stats?.catalogViews ?? 0;
+
+  if (timeframe === "daily") {
+    displayRevenueVal = todaySales;
+    displayOrdersVal = todayOrders;
+    displayViewsVal = todayVisitors;
+  } else if (timeframe === "weekly") {
+    displayRevenueVal = weeklyStats?.weeklyRevenue ?? 0;
+    displayOrdersVal = weeklyStats?.weeklyOrders ?? 0;
+    displayViewsVal = weeklyStats?.weeklyViews ?? 0;
+  } else if (timeframe === "monthly") {
+    displayRevenueVal = monthlyStats?.monthlyRevenue ?? revenue;
+    displayOrdersVal = monthlyStats?.monthlyOrders ?? (summaryStats?.totalOrders ?? 0);
+    displayViewsVal = monthlyStats?.monthlyViews ?? 0;
+  }
 
   const metricCards = [
     {
       title: `${timeframe.toUpperCase()} Revenue`,
-      value: displayRevenue,
+      value: formatCurrency(displayRevenueVal),
       subtitle: `Gross sales (${timeframe})`,
       icon: DollarSign,
       color: "text-emerald-600 bg-emerald-100",
     },
     {
       title: `${timeframe.toUpperCase()} Orders`,
-      value: displayOrders.toString(),
+      value: displayOrdersVal.toString(),
       subtitle: `Completed sales (${timeframe})`,
       icon: ShoppingBag,
       color: "text-blue-600 bg-blue-100",
     },
     {
       title: `${timeframe.toUpperCase()} Store Views`,
-      value: displayViews.toString(),
+      value: displayViewsVal.toString(),
       subtitle: `Catalog impressions (${timeframe})`,
       icon: Eye,
       color: "text-indigo-600 bg-indigo-100",

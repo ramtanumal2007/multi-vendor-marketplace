@@ -82,9 +82,13 @@ export interface UsageStatus {
   remainingSlots: number | null;
 }
 
-export function getProductUsageStatus(currentProducts: number, plan: MembershipPlan = "BASIC"): UsageStatus {
+export function getProductUsageStatus(
+  currentProducts: number,
+  plan: MembershipPlan = "BASIC",
+  customMaxProducts?: number | null
+): UsageStatus {
   const planInfo = MEMBERSHIP_PLANS[plan] || MEMBERSHIP_PLANS.BASIC;
-  const max = planInfo.maxProducts;
+  const max = customMaxProducts !== undefined ? customMaxProducts : planInfo.maxProducts;
 
   if (max === null) {
     return {

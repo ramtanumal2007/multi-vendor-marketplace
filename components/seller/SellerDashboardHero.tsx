@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { Store, Calendar, Sparkles, ChevronDown, ChevronUp, CheckCircle2, Circle, ArrowUpRight, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { DownloadCertificateButton } from "./DownloadCertificateButton";
-import { getProductUsageStatus } from "@/lib/membership";
+import { getProductUsageStatus, MembershipPlan } from "@/lib/membership";
 import { computeSellerMetrics } from "@/lib/sellerMetrics";
 
 interface SellerDashboardHeroProps {
@@ -16,15 +16,22 @@ interface SellerDashboardHeroProps {
 export function SellerDashboardHero({ sellerProfile, store, productCount }: SellerDashboardHeroProps) {
   const [showChecklist, setShowChecklist] = useState(false);
 
-  const plan = sellerProfile?.membership_plan || "BASIC";
-  const usage = getProductUsageStatus(productCount, plan);
+  const plan = (sellerProfile?.membership_plan as MembershipPlan) || "BASIC";
+  const customMax = typeof sellerProfile?.max_products === "number" ? sellerProfile.max_products : undefined;
+  const usage = getProductUsageStatus(productCount, plan, customMax);
   const metrics = computeSellerMetrics(sellerProfile, store, productCount);
 
-  const formattedApprovalDate = sellerProfile?.approved_at
-    ? new Date(sellerProfile.approved_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+  const approvedAtStr = typeof sellerProfile?.approved_at === "string" ? sellerProfile.approved_at : "";
+  const formattedApprovalDate = approvedAtStr
+    ? new Date(approvedAtStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : sellerProfile?.verification_status === "approved"
     ? "Approved"
     : "Pending Approval";
+
+  const storeNameStr = (store?.name as string) || "Official Store";
+  const sellerIdCodeStr = (sellerProfile?.seller_id_code as string) || "SLR-PENDING";
+  const contactNameStr = (sellerProfile?.contact_name as string) || storeNameStr || "Partner";
+  const verificationStatusStr = (sellerProfile?.verification_status as string) || "Pending";
 
   return (
     <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl p-6 md:p-8 shadow-xl border border-slate-700/60 mb-8 relative overflow-hidden">
@@ -37,11 +44,11 @@ export function SellerDashboardHero({ sellerProfile, store, productCount }: Sell
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs font-semibold px-3 py-1 rounded-full flex items-center gap-1.5">
-                <Store className="w-3.5 h-3.5" /> Store: {store?.name || "Official Store"}
+                <Store className="w-3.5 h-3.5" /> Store: {storeNameStr}
               </span>
 
               <span className="bg-slate-700/80 text-slate-200 border border-slate-600 text-xs font-mono px-3 py-1 rounded-full">
-                ID: {sellerProfile?.seller_id_code || "SLR-PENDING"}
+                ID: {sellerIdCodeStr}
               </span>
 
               <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-semibold px-3 py-1 rounded-full">
@@ -54,7 +61,7 @@ export function SellerDashboardHero({ sellerProfile, store, productCount }: Sell
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Welcome back, {sellerProfile?.contact_name || store?.name || "Partner"}! 👋
+              Welcome back, {contactNameStr}! 👋
             </h1>
             <p className="text-slate-400 text-sm mt-1">
               Manage your marketplace products, track sales performance, and optimize your store catalog.
@@ -80,12 +87,12 @@ export function SellerDashboardHero({ sellerProfile, store, productCount }: Sell
             )}
 
             <DownloadCertificateButton
-              sellerIdCode={sellerProfile?.seller_id_code}
-              storeName={store?.name}
-              businessName={sellerProfile?.business_name}
-              contactName={sellerProfile?.contact_name}
-              approvalDate={sellerProfile?.approved_at}
-              status={sellerProfile?.verification_status}
+              sellerIdCode={sellerIdCodeStr}
+              storeName={storeNameStr}
+              businessName={sellerProfile?.business_name as string | undefined}
+              contactName={sellerProfile?.contact_name as string | undefined}
+              approvalDate={sellerProfile?.approved_at as string | undefined}
+              status={sellerProfile?.verification_status as string | undefined}
               variant="outline"
             />
           </div>
@@ -114,14 +121,14 @@ export function SellerDashboardHero({ sellerProfile, store, productCount }: Sell
                 </div>
                 {usage.isLimitReached ? (
                   <p className="text-xs text-red-400 flex items-center font-medium">
-                    <AlertTriangle className="w-3.5 h-3.5 mr-1 flex-shrink-0" /> Product limit reached. Upgrade to PRO.
+                    <AlertTriangle className="w-3.5 h-3.5 mr-1 flex-shrink-0" /> Product limit reached ({usage.maxProducts}). Upgrade to PRO.
                   </p>
                 ) : usage.isWarning ? (
                   <p className="text-xs text-amber-400 flex items-center font-medium">
-                    <AlertTriangle className="w-3.5 h-3.5 mr-1 flex-shrink-0" /> Warning: 9 of 10 slots used. Upgrade to PRO.
+                    <AlertTriangle className="w-3.5 h-3.5 mr-1 flex-shrink-0" /> Warning: {productCount} of {usage.maxProducts} slots used. Upgrade to PRO.
                   </p>
                 ) : (
-                  <p className="text-xs text-slate-400">{usage.remainingSlots} product slots remaining in BASIC plan.</p>
+                  <p className="text-xs text-slate-400">{usage.remainingSlots} product slots remaining in {plan} plan.</p>
                 )}
               </div>
             )}
@@ -155,7 +162,7 @@ export function SellerDashboardHero({ sellerProfile, store, productCount }: Sell
               <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
                 sellerProfile?.verification_status === "approved" ? "bg-green-500/20 text-green-300 border border-green-500/30" : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
               }`}>
-                {(sellerProfile?.verification_status || "Pending").toUpperCase()}
+                {verificationStatusStr.toUpperCase()}
               </span>
             </div>
             <div className="mt-2 text-xs text-slate-300 flex items-center">

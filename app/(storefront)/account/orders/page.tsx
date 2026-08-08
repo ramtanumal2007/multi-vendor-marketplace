@@ -1,7 +1,9 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import React, { useEffect, useState } from "react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, mapInternalToCustomerStage } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
@@ -83,14 +85,19 @@ export default function OrdersPage() {
                     <td className="px-6 py-4 font-medium text-foreground">{order.order_number}</td>
                     <td className="px-6 py-4 text-foreground-secondary">{formatDate(order.created_at)}</td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${
-                        order.fulfillment_status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        order.fulfillment_status === 'delivered' ? 'bg-green-100 text-green-800' :
-                        order.fulfillment_status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
-                        {order.fulfillment_status}
-                      </span>
+                      {(() => {
+                        const custStage = mapInternalToCustomerStage(order.fulfillment_status);
+                        return (
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            custStage === 'DELIVERED' ? 'bg-green-100 text-green-800' :
+                            custStage === 'CANCELLED' ? 'bg-red-100 text-red-800' :
+                            custStage === 'SHIPPED' ? 'bg-blue-100 text-blue-800' :
+                            'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {custStage}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-4 text-foreground-secondary">-</td>
                     <td className="px-6 py-4 text-right font-medium text-foreground">{formatCurrency(order.total)}</td>

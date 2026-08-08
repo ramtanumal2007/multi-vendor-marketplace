@@ -27,6 +27,8 @@ import {
   INTERNAL_ORDER_STATUSES,
   normalizeInternalStatus,
   mapInternalToFulfillmentStatus,
+  getGoogleMapsUrl,
+  formatSequentialCustomerId,
 } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
@@ -589,10 +591,52 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
               </div>
               <div>
                 <span className="text-slate-400 block font-medium">Customer ID</span>
-                <code className="font-mono text-[10px] font-bold text-slate-700">
-                  {order.user_id || "Guest"}
+                <code className="font-mono text-[10px] font-bold text-blue-600">
+                  {order.user_id ? formatSequentialCustomerId(0, customerProfile?.customer_id_code) : "Guest"}
                 </code>
               </div>
+            </div>
+          </div>
+
+          {/* Delivery Location & Google Maps Card */}
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm p-6 space-y-3 text-xs">
+            <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-3">
+              <MapPin className="w-4 h-4 text-emerald-600" /> Shipping & Delivery Location
+            </h3>
+
+            <div className="space-y-2 text-slate-700">
+              <div className="font-bold text-slate-900 text-sm">
+                {ship.first_name} {ship.last_name}
+              </div>
+              <div>{ship.address_line1}</div>
+              {ship.address_line2 && <div>{ship.address_line2}</div>}
+              {ship.landmark && (
+                <div className="text-amber-700 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 text-[11px] font-medium">
+                  Landmark: {ship.landmark}
+                </div>
+              )}
+              <div>
+                {[ship.city, ship.postal_code, ship.country || "IN"].filter(Boolean).join(", ")}
+              </div>
+
+              {(() => {
+                const mapsUrl = getGoogleMapsUrl(ship);
+                if (!mapsUrl) return null;
+                return (
+                  <div className="pt-2">
+                    <a
+                      href={mapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-bold text-xs hover:bg-emerald-100 transition-colors"
+                    >
+                      <MapPin className="w-3.5 h-3.5" />
+                      Open Location in Google Maps
+                      <ExternalLink className="w-3 h-3 ml-0.5" />
+                    </a>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 

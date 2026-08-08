@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import React, { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase";
 import {
@@ -17,7 +19,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { Modal } from "@/components/ui/Modal";
-import { formatCurrency, formatExactDateTime, formatRelativeTime } from "@/lib/utils";
+import { formatCurrency, formatExactDateTime, formatRelativeTime, formatSequentialSellerId } from "@/lib/utils";
 import { SellerDetailsModal } from "@/components/admin/SellerDetailsModal";
 import { CustomerDetailsModal } from "@/components/admin/CustomerDetailsModal";
 
@@ -312,12 +314,12 @@ export default function AdminSellersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
-                {filteredSellers.map((seller) => {
+                {filteredSellers.map((seller, index) => {
                   return (
                     <tr key={seller.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-4 align-top">
                         <div className="font-bold text-slate-900 mb-0.5">{seller.business_name || seller.contact_name}</div>
-                        <div className="font-mono text-[10px] text-slate-400 font-medium">ID: {seller.id}</div>
+                        <div className="font-mono text-[10px] font-semibold text-indigo-600">ID: {formatSequentialSellerId(index, seller.seller_id_code)}</div>
                         <div className="text-slate-500 text-xs mt-0.5 flex items-center gap-1">
                           <Zap className="w-3 h-3 text-amber-500" />
                           {seller.membership_plan || "BASIC"}

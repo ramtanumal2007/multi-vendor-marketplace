@@ -128,3 +128,88 @@ export function mapInternalToFulfillmentStatus(internalStatus: string): string {
   }
 }
 
+export function formatSequentialCustomerId(index: number, existingCode?: string | null): string {
+  if (existingCode && existingCode.startsWith("CUS-")) return existingCode;
+  return `CUS-${String(index + 1).padStart(6, "0")}`;
+}
+
+export function formatSequentialSellerId(index: number, existingCode?: string | null): string {
+  if (existingCode && (existingCode.startsWith("SEL-") || existingCode.startsWith("STORE-"))) return existingCode;
+  return `SEL-${String(index + 1).padStart(6, "0")}`;
+}
+
+export function isRawUuid(val?: string | null): boolean {
+  if (!val) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+}
+
+export function formatDisplaySku(sku?: string | null): string | null {
+  if (!sku) return null;
+  if (isRawUuid(sku)) return null;
+  return sku;
+}
+
+export function getDeliveryEstimateText(
+  sellerProcessingDays?: number | null,
+  customerPin?: string | null,
+  storePin?: string | null
+): { message: string; isEstimated: boolean; estimatedDateRange?: string } {
+  const processing = typeof sellerProcessingDays === "number" && sellerProcessingDays > 0 ? sellerProcessingDays : null;
+
+  if (processing !== null) {
+    const minDays = processing + 1;
+    const maxDays = processing + 3;
+
+    const minDate = new Date();
+    minDate.setDate(minDate.getDate() + minDays);
+
+    const maxDate = new Date();
+    maxDate.setDate(maxDate.getDate() + maxDays);
+
+    const minStr = new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short" }).format(minDate);
+    const maxStr = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(maxDate);
+
+    return {
+      message: `Estimated Delivery: ${minStr} - ${maxStr} (${minDays}-${maxDays} business days)`,
+      isEstimated: true,
+      estimatedDateRange: `${minDays}-${maxDays} days`,
+    };
+  }
+
+  // If no configured processing/transit data exists, return neutral message without fabricating fake ETA
+  return {
+    message: "Standard shipping available — Final delivery date calculated at checkout",
+    isEstimated: false,
+  };
+}
+
+export function getGoogleMapsUrl(address?: {
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  landmark?: string | null;
+  google_maps_url?: string | null;
+}): string | null {
+  if (!address) return null;
+  if (address.google_maps_url && address.google_maps_url.trim().startsWith("http")) {
+    return address.google_maps_url.trim();
+  }
+
+  const parts = [
+    address.landmark,
+    address.address_line1,
+    address.address_line2,
+    address.city,
+    address.state,
+    address.postal_code,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  if (!parts.trim()) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts)}`;
+}
+
+

@@ -22,7 +22,15 @@ import {
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { formatCurrency, formatExactDateTime, formatRelativeTime, normalizeInternalStatus } from "@/lib/utils";
+import {
+  formatCurrency,
+  formatExactDateTime,
+  formatRelativeTime,
+  formatSequentialSellerId,
+  formatSequentialCustomerId,
+  getGoogleMapsUrl,
+  normalizeInternalStatus,
+} from "@/lib/utils";
 import Link from "next/link";
 import { Modal } from "@/components/ui/Modal";
 
@@ -326,7 +334,7 @@ export function SellerDetailsModal({
                 </span>
               </div>
               <p className="text-xs text-slate-500 font-mono">
-                Store: {store?.name || "No Store"} • ID: {seller?.id}
+                Store: {store?.name || "No Store"} • ID: {formatSequentialSellerId(0, seller?.seller_id_code)}
               </p>
             </div>
           </div>

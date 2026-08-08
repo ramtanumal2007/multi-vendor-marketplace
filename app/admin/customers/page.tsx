@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import React, { useState, useEffect } from "react";
 import {
   Search,
@@ -18,7 +20,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
-import { formatCurrency, formatExactDateTime, formatRelativeTime } from "@/lib/utils";
+import { formatCurrency, formatExactDateTime, formatRelativeTime, formatSequentialCustomerId } from "@/lib/utils";
 import { CustomerDetailsModal } from "@/components/admin/CustomerDetailsModal";
 import { SellerDetailsModal } from "@/components/admin/SellerDetailsModal";
 
@@ -31,6 +33,7 @@ interface CustomerProfile {
   role: string;
   status?: string;
   created_at: string;
+  customer_id_code?: string;
   order_count?: number;
   total_spent?: number;
   last_order_at?: string | null;
@@ -53,10 +56,11 @@ export default function AdminCustomersPage() {
     setIsLoading(true);
 
     try {
-      // 1. Fetch profiles
+      // 1. Fetch strictly customer profiles only (exclude sellers & admins)
       const { data: profilesData, error } = await supabase
         .from("profiles")
         .select("*")
+        .eq("role", "customer")
         .order("created_at", { ascending: false });
 
       if (!error && profilesData) {
@@ -117,7 +121,8 @@ export default function AdminCustomersPage() {
       (c.email && c.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (c.full_name && c.full_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (c.phone && c.phone.includes(searchTerm)) ||
-      c.id.toLowerCase().includes(searchTerm.toLowerCase());
+      c.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.customer_id_code && c.customer_id_code.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const cStatus = c.status || "active";
     let matchesStatus = true;
@@ -203,7 +208,7 @@ export default function AdminCustomersPage() {
                     Loading customer profiles...
                   </td>
                 </tr>
-              ) : filteredCustomers.map((customer) => {
+              ) : filteredCustomers.map((customer, index) => {
                 const cStatus = customer.status || "active";
 
                 return (
@@ -225,8 +230,8 @@ export default function AdminCustomersPage() {
                           <div className="font-bold text-slate-900 truncate">
                             {customer.full_name || "Guest Customer"}
                           </div>
-                          <div className="font-mono text-[10px] text-slate-400 truncate">
-                            ID: {customer.id}
+                          <div className="font-mono text-[10px] font-semibold text-blue-600 truncate">
+                            ID: {formatSequentialCustomerId(index, customer.customer_id_code)}
                           </div>
                         </div>
                       </div>

@@ -31,7 +31,15 @@ export default function CheckoutPage() {
   const { addToast } = useToast();
 
   const [form, setForm] = useState({
-    firstName: "", lastName: "", email: "", addressLine1: "", addressLine2: "", city: "", postalCode: ""
+    firstName: "",
+    lastName: "",
+    email: "",
+    addressLine1: "",
+    addressLine2: "",
+    landmark: "",
+    googleMapsUrl: "",
+    city: "",
+    postalCode: "",
   });
 
   useEffect(() => {
@@ -51,9 +59,15 @@ export default function CheckoutPage() {
     
     // Create order payload
     const shippingAddress = {
-      first_name: form.firstName, last_name: form.lastName,
-      address_line1: form.addressLine1, address_line2: form.addressLine2,
-      city: form.city, postal_code: form.postalCode, country: "IN"
+      first_name: form.firstName,
+      last_name: form.lastName,
+      address_line1: form.addressLine1,
+      address_line2: form.addressLine2,
+      landmark: form.landmark,
+      google_maps_url: form.googleMapsUrl,
+      city: form.city,
+      postal_code: form.postalCode,
+      country: "IN",
     };
 
     const { data: orderData, error: orderError } = await supabase.from("orders").insert({
@@ -161,6 +175,10 @@ export default function CheckoutPage() {
                 <Input label="Email Address" type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
                 <Input label="Address Line 1" value={form.addressLine1} onChange={e => setForm({...form, addressLine1: e.target.value})} />
                 <Input label="Address Line 2 (Optional)" value={form.addressLine2} onChange={e => setForm({...form, addressLine2: e.target.value})} />
+                <div className="grid grid-cols-2 gap-4">
+                  <Input label="Landmark (Optional)" placeholder="e.g. Near Metro Station / Opp Bank" value={form.landmark} onChange={e => setForm({...form, landmark: e.target.value})} />
+                  <Input label="Google Maps Link / URL (Optional)" placeholder="https://maps.google.com/..." value={form.googleMapsUrl} onChange={e => setForm({...form, googleMapsUrl: e.target.value})} />
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <Input label="City" value={form.city} onChange={e => setForm({...form, city: e.target.value})} />
                   <Input label="Postal Code" value={form.postalCode} onChange={e => setForm({...form, postalCode: e.target.value})} />

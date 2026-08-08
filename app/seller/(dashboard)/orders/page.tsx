@@ -28,7 +28,10 @@ import {
   formatRelativeTime,
   normalizeInternalStatus,
   mapInternalToFulfillmentStatus,
+  getGoogleMapsUrl,
+  formatSequentialCustomerId,
 } from "@/lib/utils";
+import { MapPin, ExternalLink } from "lucide-react";
 
 interface SellerOrderItem {
   id: string;
@@ -577,6 +580,42 @@ export default function SellerOrdersPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Shipping Address & Google Maps Location */}
+              {selectedOrder.shipping_address && (
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 text-xs text-slate-700">
+                  <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                    <MapPin className="w-4 h-4 text-emerald-600" /> Delivery Address
+                  </div>
+                  <div>
+                    {selectedOrder.shipping_address.first_name} {selectedOrder.shipping_address.last_name} — {selectedOrder.shipping_address.address_line1}
+                  </div>
+                  {selectedOrder.shipping_address.landmark && (
+                    <div className="text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px] inline-block">
+                      Landmark: {selectedOrder.shipping_address.landmark}
+                    </div>
+                  )}
+                  <div>
+                    {[selectedOrder.shipping_address.city, selectedOrder.shipping_address.postal_code, selectedOrder.shipping_address.country || "IN"].filter(Boolean).join(", ")}
+                  </div>
+                  {(() => {
+                    const gMapsUrl = getGoogleMapsUrl(selectedOrder.shipping_address);
+                    if (!gMapsUrl) return null;
+                    return (
+                      <div className="pt-1">
+                        <a
+                          href={gMapsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md font-bold text-[11px] hover:bg-emerald-100 transition-colors"
+                        >
+                          <MapPin className="w-3 h-3" /> Open in Google Maps <ExternalLink className="w-3 h-3 ml-0.5" />
+                        </a>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
               {/* Custom Customer Message Post Area (If seller control active) */}
               {["ORDERED", "CONFIRMED"].includes(selectedOrder.internal_status) ? (

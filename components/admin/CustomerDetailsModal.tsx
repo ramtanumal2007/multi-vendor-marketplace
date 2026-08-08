@@ -5,7 +5,7 @@ import { X, Mail, Phone, Calendar, UserCheck, Package, ShoppingBag, Store, Exter
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { formatCurrency, formatExactDateTime, formatRelativeTime, normalizeInternalStatus } from "@/lib/utils";
+import { formatCurrency, formatExactDateTime, formatRelativeTime, formatSequentialCustomerId, normalizeInternalStatus } from "@/lib/utils";
 import Link from "next/link";
 
 interface CustomerDetailsModalProps {
@@ -25,6 +25,7 @@ interface CustomerProfile {
   role: string;
   status?: string;
   created_at: string;
+  customer_id_code?: string;
 }
 
 interface EnrichedOrder {
@@ -368,8 +369,8 @@ export function CustomerDetailsModal({
 
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
                   <span className="text-slate-400 font-medium block">Customer ID</span>
-                  <code className="font-mono text-[10px] font-bold text-slate-700 block truncate">
-                    {profile.id}
+                  <code className="font-mono text-[11px] font-bold text-blue-700 block truncate">
+                    {formatSequentialCustomerId(0, profile.customer_id_code)}
                   </code>
                 </div>
               </div>

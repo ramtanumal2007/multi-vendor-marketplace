@@ -15,29 +15,33 @@ import { ShoppingCart } from "lucide-react";
 
 interface ProductCardProps {
   id: string;
-  slug: string;
+  slug?: string;
   title: string;
   price: number;
   salePrice?: number | null;
   sale_price?: number | null;
-  primaryImage: string;
+  primaryImage?: string;
+  image?: string;
   secondaryImage?: string;
   isNew?: boolean;
+  category?: string;
   onQuickAdd?: () => void;
 }
 
 export function ProductCard({
   id,
-  slug,
+  slug = id,
   title,
   price,
   salePrice,
   sale_price,
   primaryImage,
+  image,
   secondaryImage,
   isNew,
   onQuickAdd,
 }: ProductCardProps) {
+  const displayImage = primaryImage || image || "/placeholder.jpg";
   const [isHovered, setIsHovered] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [isWishlistLoading, setIsWishlistLoading] = useState(false);
@@ -114,7 +118,7 @@ export function ProductCard({
           className="absolute inset-0 h-full w-full"
         >
           <Image
-            src={primaryImage}
+            src={displayImage}
             alt={title}
             fill
             className="object-cover"

@@ -4,18 +4,45 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, ShoppingBag, User, Menu, X, Sun, Moon, MapPin, ChevronDown } from "lucide-react";
+import { 
+  Search, 
+  ShoppingBag, 
+  User, 
+  Menu, 
+  X, 
+  Sun, 
+  Moon, 
+  MapPin, 
+  ChevronDown, 
+  Package, 
+  Heart, 
+  Store, 
+  HelpCircle, 
+  LogOut, 
+  LogIn, 
+  LayoutDashboard,
+  Bell
+} from "lucide-react";
 import { useCart } from "@/lib/context/CartContext";
 import { cn } from "@/lib/utils";
 import { SearchModal } from "./SearchModal";
 import { useTheme } from "@/lib/context/ThemeContext";
 import { createClient } from "@/lib/supabase";
+import { CustomerNotificationCenter } from "@/components/customer/CustomerNotificationCenter";
+
+interface CategoryItem {
+  name: string;
+  slug: string;
+}
 
 export function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
+  
   const pathname = usePathname();
   const { itemCount, openDrawer } = useCart();
   const { theme, toggleTheme } = useTheme();
@@ -27,6 +54,19 @@ export function Header() {
       if (data) setCategories(data);
     }
     fetchCategories();
+
+    // Check user auth state
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user ? { id: data.user.id, email: data.user.email } : null);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, [supabase]);
 
   useEffect(() => {
@@ -37,7 +77,14 @@ export function Header() {
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
+    setIsAccountMenuOpen(false);
   }, [pathname]);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setIsAccountMenuOpen(false);
+  };
 
   return (
     <>
@@ -52,14 +99,15 @@ export function Header() {
         <div className="mx-auto max-w-[1440px] px-6 md:px-16 h-full flex items-center justify-between">
           {/* Mobile Menu Toggle */}
           <button
-            className="md:hidden p-2 -ml-2"
+            className="md:hidden p-2 -ml-2 text-foreground focus:outline-none"
             onClick={() => setIsMobileMenuOpen(true)}
+            aria-label="Open navigation menu"
           >
             <Menu className="w-6 h-6" />
           </button>
 
           {/* Logo */}
-          <Link href="/" className="font-serif text-2xl font-bold tracking-tight">
+          <Link href="/" className="font-serif text-2xl font-bold tracking-tight text-foreground">
             MY STORE
           </Link>
 
@@ -75,25 +123,143 @@ export function Header() {
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2 md:gap-4">
+          <div className="flex items-center gap-2 md:gap-3">
             <button 
               onClick={() => setIsSearchOpen(true)}
               className="p-2 hover:bg-background-secondary rounded-full transition-colors hidden md:block"
+              aria-label="Search products"
             >
               <Search className="w-5 h-5" />
             </button>
+
             <button 
               onClick={toggleTheme}
               className="p-2 hover:bg-background-secondary rounded-full transition-colors hidden md:block"
+              aria-label="Toggle theme"
             >
               {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
-            <Link href="/account" className="p-2 hover:bg-background-secondary rounded-full transition-colors hidden md:block">
-              <User className="w-5 h-5" />
-            </Link>
+
+            {/* Customer Notification Bell (Directly visible in header) */}
+            {user?.id && (
+              <div className="flex items-center">
+                <CustomerNotificationCenter userId={user.id} />
+              </div>
+            )}
+
+            {/* Collapsible Customer Account Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setIsAccountMenuOpen(!isAccountMenuOpen)}
+                className="p-2 hover:bg-background-secondary rounded-full transition-colors focus:outline-none"
+                aria-label="Customer account menu"
+                aria-expanded={isAccountMenuOpen}
+              >
+                <User className="w-5 h-5" />
+              </button>
+
+              {isAccountMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsAccountMenuOpen(false)} />
+                  <div className="absolute right-0 mt-2 w-64 bg-background border border-border rounded-2xl shadow-xl z-50 overflow-hidden py-2 animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="px-4 py-3 border-b border-border bg-background-secondary/40">
+                      <p className="text-xs font-semibold text-foreground-secondary uppercase tracking-wider">Account</p>
+                      <p className="text-sm font-bold text-foreground truncate mt-0.5">
+                        {user?.email || "Guest Visitor"}
+                      </p>
+                    </div>
+
+                    <nav className="py-1 text-xs font-medium">
+                      {user ? (
+                        <>
+                          <Link
+                            href="/account"
+                            onClick={() => setIsAccountMenuOpen(false)}
+                            className="flex items-center gap-2.5 px-4 py-2.5 text-foreground hover:bg-background-secondary transition-colors"
+                          >
+                            <LayoutDashboard className="w-4 h-4 text-accent" />
+                            Dashboard
+                          </Link>
+                          <Link
+                            href="/account/orders"
+                            onClick={() => setIsAccountMenuOpen(false)}
+                            className="flex items-center gap-2.5 px-4 py-2.5 text-foreground hover:bg-background-secondary transition-colors"
+                          >
+                            <Package className="w-4 h-4 text-foreground-secondary" />
+                            My Orders
+                          </Link>
+                        </>
+                      ) : (
+                        <Link
+                          href="/login"
+                          onClick={() => setIsAccountMenuOpen(false)}
+                          className="flex items-center gap-2.5 px-4 py-2.5 text-accent font-bold hover:bg-background-secondary transition-colors"
+                        >
+                          <LogIn className="w-4 h-4 text-accent" />
+                          Sign In / Register
+                        </Link>
+                      )}
+
+                      <Link
+                        href="/wishlist"
+                        onClick={() => setIsAccountMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-foreground hover:bg-background-secondary transition-colors"
+                      >
+                        <Heart className="w-4 h-4 text-foreground-secondary" />
+                        Wishlist
+                      </Link>
+
+                      <button
+                        onClick={() => {
+                          setIsAccountMenuOpen(false);
+                          openDrawer();
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-foreground hover:bg-background-secondary transition-colors text-left"
+                      >
+                        <ShoppingBag className="w-4 h-4 text-foreground-secondary" />
+                        Shopping Cart ({itemCount})
+                      </button>
+
+                      <Link
+                        href="/stores"
+                        onClick={() => setIsAccountMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-foreground hover:bg-background-secondary transition-colors"
+                      >
+                        <Store className="w-4 h-4 text-foreground-secondary" />
+                        Local Stores
+                      </Link>
+
+                      <Link
+                        href="/faq"
+                        onClick={() => setIsAccountMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-foreground hover:bg-background-secondary transition-colors"
+                      >
+                        <HelpCircle className="w-4 h-4 text-foreground-secondary" />
+                        Help & FAQ
+                      </Link>
+                    </nav>
+
+                    {user && (
+                      <div className="pt-1 mt-1 border-t border-border">
+                        <button
+                          onClick={handleSignOut}
+                          className="flex w-full items-center gap-2.5 px-4 py-2.5 text-xs font-semibold text-destructive hover:bg-destructive/10 transition-colors text-left"
+                        >
+                          <LogOut className="w-4 h-4" />
+                          Sign Out
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Cart Trigger */}
             <button
               onClick={openDrawer}
               className="p-2 hover:bg-background-secondary rounded-full transition-colors relative"
+              aria-label="View shopping cart"
             >
               <ShoppingBag className="w-5 h-5" />
               <AnimatePresence>
@@ -153,16 +319,21 @@ export function Header() {
               <Link href="/" className="font-serif text-2xl font-bold tracking-tight">
                 MY STORE
               </Link>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {user?.id && (
+                  <CustomerNotificationCenter userId={user.id} />
+                )}
                 <button 
                   onClick={toggleTheme}
                   className="p-2 hover:bg-background-secondary rounded-full transition-colors"
+                  aria-label="Toggle theme"
                 >
                   {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                 </button>
                 <button
                   className="p-2 -mr-2"
                   onClick={() => setIsMobileMenuOpen(false)}
+                  aria-label="Close menu"
                 >
                   <X className="w-6 h-6" />
                 </button>
@@ -180,33 +351,54 @@ export function Header() {
               </div>
             </div>
 
-            <nav className="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-6">
-              <Link href="/products" className="text-xl font-semibold" onClick={() => setIsMobileMenuOpen(false)}>
+            <nav className="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-5">
+              <Link href="/products" className="text-lg font-semibold" onClick={() => setIsMobileMenuOpen(false)}>
                 All Products
               </Link>
-              <Link href="/stores" className="text-xl font-semibold text-secondary-accent flex items-center gap-2" onClick={() => setIsMobileMenuOpen(false)}>
+              <Link href="/stores" className="text-lg font-semibold text-secondary-accent flex items-center gap-2" onClick={() => setIsMobileMenuOpen(false)}>
                 Local Stores <span className="px-2 py-0.5 bg-secondary-accent/10 rounded text-[10px]">NEW</span>
               </Link>
-              <div className="flex flex-col gap-3 mt-2 p-4 bg-accent/5 rounded-lg border border-accent/10">
-                <Link href="/seller/register" className="text-lg font-bold text-accent" onClick={() => setIsMobileMenuOpen(false)}>
+              
+              {user ? (
+                <div className="flex flex-col gap-2 p-3 bg-background-secondary/60 rounded-xl border border-border">
+                  <span className="text-[10px] font-bold text-foreground-secondary uppercase tracking-wider">My Account</span>
+                  <Link href="/account" className="text-sm font-medium text-foreground" onClick={() => setIsMobileMenuOpen(false)}>
+                    Dashboard
+                  </Link>
+                  <Link href="/account/orders" className="text-sm font-medium text-foreground" onClick={() => setIsMobileMenuOpen(false)}>
+                    My Orders
+                  </Link>
+                  <Link href="/wishlist" className="text-sm font-medium text-foreground" onClick={() => setIsMobileMenuOpen(false)}>
+                    Wishlist
+                  </Link>
+                </div>
+              ) : (
+                <Link href="/login" className="text-lg font-bold text-accent" onClick={() => setIsMobileMenuOpen(false)}>
+                  Sign In / Register
+                </Link>
+              )}
+
+              <div className="flex flex-col gap-3 p-4 bg-accent/5 rounded-lg border border-accent/10">
+                <Link href="/seller/register" className="text-base font-bold text-accent" onClick={() => setIsMobileMenuOpen(false)}>
                   Become a Seller
                 </Link>
-                <Link href="/seller/login" className="text-base font-medium text-foreground-secondary" onClick={() => setIsMobileMenuOpen(false)}>
+                <Link href="/seller/login" className="text-sm font-medium text-foreground-secondary" onClick={() => setIsMobileMenuOpen(false)}>
                   Seller Login
                 </Link>
               </div>
-              <div className="h-px bg-border w-full my-2" />
-              <h3 className="text-sm font-bold text-foreground-secondary uppercase tracking-wider">Categories</h3>
+
+              <div className="h-px bg-border w-full my-1" />
+              <h3 className="text-xs font-bold text-foreground-secondary uppercase tracking-wider">Categories</h3>
               {categories.map((cat, i) => (
                 <motion.div
                   key={cat.slug}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.05 }}
+                  transition={{ delay: i * 0.03 }}
                 >
                   <Link
                     href={`/categories/${cat.slug}`}
-                    className="text-lg font-medium text-foreground"
+                    className="text-base font-medium text-foreground"
                     onClick={() => setIsMobileMenuOpen(false)}
                   >
                     {cat.name}
@@ -214,11 +406,25 @@ export function Header() {
                 </motion.div>
               ))}
             </nav>
+
             <div className="p-6 border-t border-border flex justify-between items-center bg-background">
-              <Link href="/account" className="flex flex-col items-center gap-1 text-foreground-secondary hover:text-foreground" onClick={() => setIsMobileMenuOpen(false)}>
-                <User className="w-6 h-6" />
-                <span className="text-xs font-medium">Account</span>
-              </Link>
+              {user ? (
+                <button 
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    handleSignOut();
+                  }} 
+                  className="flex items-center gap-1.5 text-xs font-semibold text-destructive"
+                >
+                  <LogOut className="w-4 h-4" /> Sign Out
+                </button>
+              ) : (
+                <Link href="/account" className="flex flex-col items-center gap-1 text-foreground-secondary hover:text-foreground" onClick={() => setIsMobileMenuOpen(false)}>
+                  <User className="w-6 h-6" />
+                  <span className="text-xs font-medium">Account</span>
+                </Link>
+              )}
+
               <button 
                 onClick={() => {
                   setIsMobileMenuOpen(false);

@@ -14,7 +14,8 @@ import {
   BarChart,
   LogOut,
   Store,
-  Briefcase
+  Briefcase,
+  Bell
 } from "lucide-react";
 import { ToastContainer } from "@/components/ui/Toast";
 
@@ -27,6 +28,7 @@ const ADMIN_LINKS = [
   { label: "Sellers", href: "/admin/sellers", icon: Briefcase },
   { label: "Stores", href: "/admin/stores", icon: Store },
   { label: "Coupons", href: "/admin/coupons", icon: Tags },
+  { label: "Notifications", href: "/admin/notifications", icon: Bell },
   { label: "Media Library", href: "/admin/media", icon: ImageIcon },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart },
   { label: "Settings", href: "/admin/settings", icon: Settings },

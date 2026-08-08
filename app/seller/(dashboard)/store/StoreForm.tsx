@@ -5,11 +5,11 @@ import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { Store as StoreIcon, Palette, FileText, Share2, Check } from "lucide-react";
 
-export default function StoreForm({ existingStore, sellerId }: { existingStore: Record<string, unknown> | null, sellerId: string }) {
+export default function StoreForm({ existingStore, sellerId }: { existingStore: any, sellerId: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [taglineText, setTaglineText] = useState(existingStore?.tagline || "");
+  const [taglineText, setTaglineText] = useState<string>(existingStore?.tagline || "");
 
   const router = useRouter();
   const supabase = createClient();

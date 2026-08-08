@@ -57,7 +57,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           <span className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full hover:animate-[shimmer_1.5s_infinite]" />
         )}
         
-        <span className="relative z-10">{children}</span>
+        <span className="relative z-10">{children as React.ReactNode}</span>
       </motion.button>
     );
   }

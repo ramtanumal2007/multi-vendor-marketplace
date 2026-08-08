@@ -17,6 +17,7 @@ export const defaultSiteConfig: SiteConfig = {
 
 export async function fetchSiteConfig(supabaseClient: Record<string, any> | null): Promise<SiteConfig> {
   try {
+    if (!supabaseClient) return defaultSiteConfig;
     const { data } = await supabaseClient
       .from("site_settings")
       .select("site_name, tagline, contact_email, contact_phone, currency_code, currency_symbol")

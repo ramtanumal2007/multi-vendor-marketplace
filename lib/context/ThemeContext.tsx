@@ -9,7 +9,7 @@ const ThemeContext = createContext<{
   toggleTheme: () => void;
 }>({
   theme: "dark",
-  toggleTheme: () => {},
+  toggleTheme: () => { },
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {

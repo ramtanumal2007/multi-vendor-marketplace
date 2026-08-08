@@ -26,7 +26,7 @@ export default function AdminSEOPage() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setSettings(prev => ({
+    setSettings((prev: any) => ({
       ...prev,
       [name]: value
     }));

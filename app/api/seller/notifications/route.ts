@@ -153,6 +153,19 @@ export async function POST(req: NextRequest) {
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
+
+      await supabase.from("admin_notifications_log").insert({
+        sender_id: user.id,
+        target_audience: "seller",
+        target_id: targetSellerId,
+        title,
+        message,
+        type,
+        priority,
+        link_url: linkUrl || null,
+        recipient_count: 1,
+      });
+
       return NextResponse.json({ success: true });
     }
 

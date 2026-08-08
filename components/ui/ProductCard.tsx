@@ -30,7 +30,7 @@ interface ProductCardProps {
 
 export function ProductCard({
   id,
-  slug = id,
+  slug,
   title,
   price,
   salePrice,
@@ -41,6 +41,7 @@ export function ProductCard({
   isNew,
   onQuickAdd,
 }: ProductCardProps) {
+  const targetSlug = slug && typeof slug === "string" && slug.trim() !== "" ? slug.trim() : id;
   const displayImage = primaryImage || image || "/placeholder.jpg";
   const [isHovered, setIsHovered] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(false);
@@ -54,7 +55,7 @@ export function ProductCard({
   React.useEffect(() => {
     if (user && id) {
       supabase.from("wishlist").select("id").eq("user_id", user.id).eq("product_id", id).single()
-        .then(({ data }) => {
+        .then(({ data }: { data: any }) => {
           if (data) setIsWishlisted(true);
         });
     }
@@ -89,9 +90,49 @@ export function ProductCard({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <Link href={`/products/${slug}`} className="block relative aspect-square w-full overflow-hidden bg-background-secondary rounded-xl mb-1">
+      <div className="relative aspect-square w-full overflow-hidden bg-background-secondary rounded-xl mb-1">
+        <Link href={`/products/${targetSlug}`} className="block absolute inset-0 w-full h-full">
+          {/* Primary Image */}
+          <motion.div
+            animate={{ scale: isHovered ? 1.05 : 1 }}
+            transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+            className="absolute inset-0 h-full w-full"
+          >
+            <Image
+              src={displayImage}
+              alt={title}
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 50vw, 25vw"
+            />
+          </motion.div>
+
+          {/* Secondary Image */}
+          {secondaryImage && (
+            <AnimatePresence>
+              {isHovered && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.5 }}
+                  className="absolute inset-0 h-full w-full"
+                >
+                  <Image
+                    src={secondaryImage}
+                    alt={`${title} alternate`}
+                    fill
+                    className="object-cover"
+                    sizes="(max-width: 768px) 50vw, 25vw"
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )}
+        </Link>
+
         {isNew && (
-          <div className="absolute top-3 left-3 z-20 flex h-6 items-center justify-center rounded-full bg-foreground px-2 text-[10px] font-bold uppercase tracking-widest text-background">
+          <div className="absolute top-3 left-3 z-20 flex h-6 items-center justify-center rounded-full bg-foreground px-2 text-[10px] font-bold uppercase tracking-widest text-background pointer-events-none">
             New
             {/* Pulse effect */}
             <motion.span
@@ -104,50 +145,15 @@ export function ProductCard({
 
         {/* Wishlist Button */}
         <button
-          onClick={toggleWishlist}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleWishlist(e);
+          }}
           disabled={isWishlistLoading}
           className="absolute top-3 right-3 z-30 p-2 rounded-full bg-black/40 backdrop-blur-md hover:bg-black/60 text-white/70 hover:text-white transition-colors shadow-sm"
         >
           <Heart className={`w-4 h-4 ${isWishlisted ? "fill-accent text-accent" : ""}`} />
         </button>
-
-        {/* Primary Image */}
-        <motion.div
-          animate={{ scale: isHovered ? 1.05 : 1 }}
-          transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-          className="absolute inset-0 h-full w-full"
-        >
-          <Image
-            src={displayImage}
-            alt={title}
-            fill
-            className="object-cover"
-            sizes="(max-width: 768px) 50vw, 25vw"
-          />
-        </motion.div>
-
-        {/* Secondary Image */}
-        {secondaryImage && (
-          <AnimatePresence>
-            {isHovered && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.5 }}
-                className="absolute inset-0 h-full w-full"
-              >
-                <Image
-                  src={secondaryImage}
-                  alt={`${title} alternate`}
-                  fill
-                  className="object-cover"
-                  sizes="(max-width: 768px) 50vw, 25vw"
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
 
         {/* Quick Add Button (Mobile friendly) */}
         <div className="absolute bottom-3 right-3 z-20">
@@ -155,6 +161,7 @@ export function ProductCard({
             className="w-10 h-10 bg-accent text-white rounded-full flex items-center justify-center shadow-lg hover:bg-accent-hover hover:scale-105 active:scale-95 transition-all"
             onClick={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               onQuickAdd?.();
             }}
             aria-label="Add to Cart"
@@ -162,10 +169,10 @@ export function ProductCard({
             <ShoppingCart className="w-5 h-5" />
           </button>
         </div>
-      </Link>
+      </div>
 
       <div className="flex flex-col gap-1.5 flex-1 px-1">
-        <Link href={`/products/${slug}`}>
+        <Link href={`/products/${targetSlug}`}>
           <h3 className="font-medium text-[15px] leading-tight text-foreground hover:text-accent transition-colors line-clamp-2">
             {title}
           </h3>

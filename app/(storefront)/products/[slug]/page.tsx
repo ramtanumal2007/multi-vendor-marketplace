@@ -31,14 +31,37 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
 
   useEffect(() => {
     async function fetchProduct() {
-      const { data, error } = await supabase
-        .from("products")
-        .select(
-          "*, categories(name), stores(id, name, slug, address_line1, city, state, postal_code, processing_time_days), product_images(image_url), product_options(*, product_option_values(*)), product_variants(*)"
-        )
-        .eq("slug", params.slug)
-        .eq("status", "active")
-        .single();
+      setIsLoading(true);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.slug);
+
+      const selectStr =
+        "*, categories(name), stores(id, name, slug, address_line1, city, state, postal_code), product_images(image_url), product_options(*, product_option_values(*)), product_variants(*)";
+
+      // 1. Primary lookup based on slug or id
+      let query = supabase.from("products").select(selectStr).eq("status", "active");
+      if (isUuid) {
+        query = query.eq("id", params.slug);
+      } else {
+        query = query.eq("slug", params.slug);
+      }
+
+      let { data, error } = await query.single();
+
+      // 2. Fallback lookup if not found
+      if (error || !data) {
+        const fallbackKey = isUuid ? "slug" : "id";
+        const fallback = await supabase
+          .from("products")
+          .select(selectStr)
+          .eq("status", "active")
+          .eq(fallbackKey, params.slug)
+          .single();
+
+        if (fallback.data) {
+          data = fallback.data;
+          error = null;
+        }
+      }
 
       if (error || !data) {
         addToast({ title: "Product not found", type: "error" });
@@ -50,7 +73,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
       setIsLoading(false);
     }
     fetchProduct();
-  }, [params.slug, supabase, router, addToast]);
+  }, [params.slug]);
 
   const handleAddToCartWithCorrectPrice = (e: React.MouseEvent) => {
     if (!product) return;

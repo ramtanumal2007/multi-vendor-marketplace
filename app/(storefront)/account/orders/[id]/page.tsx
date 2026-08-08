@@ -132,7 +132,7 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
   const latestTimelineStatus = timeline[0]?.status;
   const currentInternalStatus = latestTimelineStatus
     ? normalizeInternalStatus(latestTimelineStatus)
-    : normalizeInternalStatus(order.fulfillment_status);
+    : normalizeInternalStatus(order.internal_status || order.fulfillment_status);
 
   const activeCustomerStage = mapInternalToCustomerStage(currentInternalStatus);
   const isCancelled = currentInternalStatus === "CANCELLED";

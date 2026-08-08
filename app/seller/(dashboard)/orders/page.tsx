@@ -496,7 +496,7 @@ export default function SellerOrdersPage() {
                               </button>
                             )}
 
-                            {(normStatus === "ORDERED" || normStatus === "CONFIRMED") && (
+                            {normStatus === "CONFIRMED" && (
                               <button
                                 disabled={updatingStatusTo === "READY TO DISPATCH"}
                                 onClick={() => handleUpdateStatus(ord, "READY TO DISPATCH")}

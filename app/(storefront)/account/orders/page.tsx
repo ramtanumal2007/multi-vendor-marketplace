@@ -86,7 +86,7 @@ export default function OrdersPage() {
                     <td className="px-6 py-4 text-foreground-secondary">{formatDate(order.created_at)}</td>
                     <td className="px-6 py-4">
                       {(() => {
-                        const custStage = mapInternalToCustomerStage(order.fulfillment_status);
+                        const custStage = mapInternalToCustomerStage(order.internal_status || order.fulfillment_status);
                         return (
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                             custStage === 'DELIVERED' ? 'bg-green-100 text-green-800' :

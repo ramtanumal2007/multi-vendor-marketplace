@@ -109,8 +109,9 @@ export default function CheckoutPage() {
     await supabase.from("order_items").insert(orderItems);
     await supabase.from("order_timeline").insert({
       order_id: orderData.id,
-      status: "Ordered",
-      note: "Order placed successfully"
+      status: "ORDERED",
+      note: "Order placed successfully",
+      created_by: user?.id
     });
 
     setIsProcessing(false);

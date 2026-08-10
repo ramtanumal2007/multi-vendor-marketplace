@@ -44,7 +44,7 @@ export default function ApplicationTrackingClient({ initialProfile, userId }: { 
           table: 'seller_profiles',
           filter: `id=eq.${userId}`
         },
-        (payload) => {
+        (payload: any) => {
           if (payload.new) {
             setProfile(payload.new as SellerProfile);
             // In a real application, you might also want to router.refresh() 

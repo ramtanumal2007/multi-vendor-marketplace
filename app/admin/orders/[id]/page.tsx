@@ -17,6 +17,7 @@ import {
   ExternalLink,
   MessageSquare,
   Send,
+  FileText,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
@@ -34,6 +35,8 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { CustomerDetailsModal } from "@/components/admin/CustomerDetailsModal";
 import { SellerDetailsModal } from "@/components/admin/SellerDetailsModal";
+import { DeliveryConfirmationModal } from "@/components/admin/DeliveryConfirmationModal";
+import { InvoiceModal } from "@/components/checkout/InvoiceModal";
 
 export default function AdminOrderDetailsPage({ params }: { params: { id: string } }) {
   const [order, setOrder] = useState<any>(null);
@@ -54,6 +57,8 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
   // Modal navigation states
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
+  const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
 
   const supabase = createClient();
   const { addToast } = useToast();
@@ -66,14 +71,14 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${params.id}` },
-        (payload) => {
+        (payload: any) => {
           setOrder(payload.new);
         }
       )
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "order_timeline", filter: `order_id=eq.${params.id}` },
-        (payload) => {
+        (payload: any) => {
           setTimeline((prev) => {
             if (prev.some((t) => t.id === payload.new.id)) return prev;
 
@@ -157,12 +162,7 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
         .order("created_at", { ascending: false });
 
       setTimeline(timelineData || []);
-
-      if (timelineData && timelineData.length > 0) {
-        setCurrentStatus(normalizeInternalStatus(timelineData[0].status));
-      } else {
-        setCurrentStatus(normalizeInternalStatus(orderData.fulfillment_status));
-      }
+      setCurrentStatus(normalizeInternalStatus(orderData.internal_status || orderData.fulfillment_status));
     } catch (err: any) {
       addToast({
         title: "Error",
@@ -174,7 +174,49 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
     }
   }
 
+  const handleConfirmDelivery = async (paymentMethod: string) => {
+    setIsUpdating(true);
+    setUpdatingTo("DELIVERED");
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      const { data, error } = await supabase.rpc("confirm_order_delivery", {
+        p_order_id: params.id,
+        p_payment_method: paymentMethod,
+        p_admin_id: user?.id,
+      });
+
+      if (error) throw error;
+
+      addToast({
+        title: "Order Delivered & Paid",
+        description: `Order marked DELIVERED and payment confirmed via ${paymentMethod}`,
+        type: "success",
+      });
+
+      setIsDeliveryModalOpen(false);
+      await fetchOrderDetails();
+    } catch (err: any) {
+      addToast({
+        title: "Error",
+        description: err.message || "Failed to confirm delivery.",
+        type: "error",
+      });
+    } finally {
+      setIsUpdating(false);
+      setUpdatingTo("");
+    }
+  };
+
   const updateStatus = async (newStatus: string) => {
+    if (newStatus === "DELIVERED") {
+      setIsDeliveryModalOpen(true);
+      return;
+    }
+
     setIsUpdating(true);
     setUpdatingTo(newStatus);
 
@@ -188,7 +230,10 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
       // 1. Update Order Table
       const { data: updatedOrder, error: orderError } = await supabase
         .from("orders")
-        .update({ fulfillment_status: dbFulfillmentStatus })
+        .update({
+          fulfillment_status: dbFulfillmentStatus,
+          internal_status: newStatus,
+        })
         .eq("id", params.id)
         .select()
         .single();
@@ -207,7 +252,7 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
         .select("*, profiles(full_name, role)")
         .single();
 
-      if (timelineError) console.warn("Timeline insert warning:", timelineError);
+      if (timelineError) throw timelineError;
 
       addToast({
         title: "Success",
@@ -334,6 +379,15 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
             </p>
           </div>
         </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setIsInvoiceModalOpen(true)}
+          className="bg-white border-slate-200 hover:bg-slate-50 font-bold text-xs h-9"
+        >
+          <FileText className="w-4 h-4 mr-1.5 text-blue-600" /> Tax Invoice
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -408,13 +462,29 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
 
           {/* Delivery & Shipping Info */}
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm p-6 space-y-3 text-xs">
-            <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-3">
-              <MapPin className="w-4 h-4 text-emerald-600" /> Delivery & Shipping Address
-            </h3>
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wider flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-emerald-600" /> Delivery & Shipping Address
+              </h3>
+              {getGoogleMapsUrl(ship) && (
+                <a
+                  href={getGoogleMapsUrl(ship)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-bold border border-emerald-200 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Open Maps Location
+                </a>
+              )}
+            </div>
             <div className="text-slate-700 space-y-1 pt-1">
               <div className="font-bold text-slate-900 text-sm">{customerName}</div>
               <div>{ship.address_line1}</div>
               {ship.address_line2 && <div>{ship.address_line2}</div>}
+              {ship.landmark && (
+                <div className="text-slate-500 font-medium">Landmark: {ship.landmark}</div>
+              )}
               <div>
                 {[ship.city, ship.state, ship.postal_code, ship.country].filter(Boolean).join(", ")}
               </div>
@@ -705,6 +775,26 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
           }}
         />
       )}
+
+      {/* Delivery Confirmation Modal */}
+      <DeliveryConfirmationModal
+        isOpen={isDeliveryModalOpen}
+        onClose={() => setIsDeliveryModalOpen(false)}
+        onConfirm={handleConfirmDelivery}
+        orderNumber={order.order_number}
+        currentPaymentMethod={order.payment_method}
+        currentPaymentStatus={order.payment_status}
+        isSubmitting={isUpdating}
+      />
+
+      {/* Tax Invoice Modal */}
+      <InvoiceModal
+        isOpen={isInvoiceModalOpen}
+        onClose={() => setIsInvoiceModalOpen(false)}
+        order={order}
+        items={items}
+        customerProfile={customerProfile}
+      />
     </div>
   );
 }

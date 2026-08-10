@@ -15,7 +15,8 @@ import {
   LogOut,
   Store,
   Briefcase,
-  Bell
+  Bell,
+  MapPin
 } from "lucide-react";
 import { ToastContainer } from "@/components/ui/Toast";
 
@@ -24,6 +25,7 @@ const ADMIN_LINKS = [
   { label: "Products", href: "/admin/products", icon: Package },
   { label: "Categories", href: "/admin/categories", icon: Tags },
   { label: "Orders", href: "/admin/orders", icon: ShoppingCart },
+  { label: "City Management", href: "/admin/cities", icon: MapPin },
   { label: "Customers", href: "/admin/customers", icon: Users },
   { label: "Sellers", href: "/admin/sellers", icon: Briefcase },
   { label: "Stores", href: "/admin/stores", icon: Store },

@@ -40,7 +40,7 @@ export default function AdminDashboard() {
       setTotalOrders(orders.length);
       setRecentOrders(orders.slice(0, 5));
       
-      const rev = orders.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
+      const rev = orders.reduce((sum: number, order: any) => sum + (Number(order.total) || 0), 0);
       setTotalRevenue(rev);
 
       // Generate dummy chart data for now but using real total scale

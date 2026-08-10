@@ -27,7 +27,7 @@ export default function AdminMediaPage() {
       addToast({ title: "Error fetching media", description: error.message, type: "error" });
     } else if (data) {
       // Filter out placeholders like .emptyFolderPlaceholder
-      const validFiles = data.filter(f => f.name !== ".emptyFolderPlaceholder");
+      const validFiles = data.filter((f: any) => f.name !== ".emptyFolderPlaceholder");
       setFiles(validFiles);
     }
     setIsLoading(false);

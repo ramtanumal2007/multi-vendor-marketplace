@@ -45,7 +45,7 @@ export function useCustomerNotifications(userId?: string) {
             .limit(20);
           if (dbData) {
             setNotifications(dbData);
-            setUnreadCount(dbData.filter((n) => !n.is_read).length);
+            setUnreadCount(dbData.filter((n: any) => !n.is_read).length);
           }
         }
       } catch (err) {
@@ -70,7 +70,7 @@ export function useCustomerNotifications(userId?: string) {
           table: "customer_notifications",
           filter: `user_id=eq.${userId}`,
         },
-        (payload) => {
+        (payload: any) => {
           const newNotif = payload.new as CustomerNotification;
           setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
           if (!newNotif.is_read) {
@@ -86,7 +86,7 @@ export function useCustomerNotifications(userId?: string) {
           table: "customer_notifications",
           filter: `user_id=eq.${userId}`,
         },
-        (payload) => {
+        (payload: any) => {
           const updatedNotif = payload.new as CustomerNotification;
           setNotifications((prev) => {
             const next = prev.map((n) => (n.id === updatedNotif.id ? { ...n, ...updatedNotif } : n));

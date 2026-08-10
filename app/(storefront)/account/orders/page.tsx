@@ -7,6 +7,8 @@ import { formatCurrency, mapInternalToCustomerStage } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
+import { FileText } from "lucide-react";
+import { InvoiceModal } from "@/components/checkout/InvoiceModal";
 
 function formatDate(dateString: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -19,6 +21,13 @@ function formatDate(dateString: string) {
 export default function OrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [customerProfile, setCustomerProfile] = useState<any>(null);
+
+  // Invoice Modal State
+  const [activeInvoiceOrder, setActiveInvoiceOrder] = useState<any>(null);
+  const [activeInvoiceItems, setActiveInvoiceItems] = useState<any[]>([]);
+  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
+
   const supabase = createClient();
 
   useEffect(() => {
@@ -26,9 +35,13 @@ export default function OrdersPage() {
       setIsLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // Fetch orders along with item count if possible, or just standard fields.
-        // Item count would require joining or just omitting it if it's not strictly necessary. 
-        // We'll omit items count or we can do a secondary fetch, but let's just show order.
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .single();
+        setCustomerProfile(prof || null);
+
         const { data } = await supabase
           .from('orders')
           .select('*')
@@ -41,6 +54,16 @@ export default function OrdersPage() {
     }
     fetchOrders();
   }, []);
+
+  const handleOpenInvoice = async (order: any) => {
+    setActiveInvoiceOrder(order);
+    const { data: items } = await supabase
+      .from("order_items")
+      .select("*, stores(name)")
+      .eq("order_id", order.id);
+    setActiveInvoiceItems(items || []);
+    setIsInvoiceOpen(true);
+  };
 
   return (
     <div className="flex flex-col gap-8">
@@ -82,7 +105,7 @@ export default function OrdersPage() {
               ) : (
                 orders.map((order) => (
                   <tr key={order.id} className="border-t border-border hover:bg-background-secondary/50 transition-colors">
-                    <td className="px-6 py-4 font-medium text-foreground">{order.order_number}</td>
+                    <td className="px-6 py-4 font-medium text-foreground">#{order.order_number}</td>
                     <td className="px-6 py-4 text-foreground-secondary">{formatDate(order.created_at)}</td>
                     <td className="px-6 py-4">
                       {(() => {
@@ -102,9 +125,19 @@ export default function OrdersPage() {
                     <td className="px-6 py-4 text-foreground-secondary">-</td>
                     <td className="px-6 py-4 text-right font-medium text-foreground">{formatCurrency(order.total)}</td>
                     <td className="px-6 py-4 text-right">
-                      <Link href={`/account/orders/${order.id}`}>
-                        <Button variant="outline" size="sm" className="h-8 text-xs px-3">View Details</Button>
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleOpenInvoice(order)}
+                          className="h-8 text-xs px-2.5 flex items-center gap-1 border-slate-300"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-blue-600" /> Invoice
+                        </Button>
+                        <Link href={`/account/orders/${order.id}`}>
+                          <Button variant="outline" size="sm" className="h-8 text-xs px-3">View Details</Button>
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -113,6 +146,16 @@ export default function OrdersPage() {
           </table>
         </div>
       </div>
+
+      {activeInvoiceOrder && (
+        <InvoiceModal
+          isOpen={isInvoiceOpen}
+          onClose={() => setIsInvoiceOpen(false)}
+          order={activeInvoiceOrder}
+          items={activeInvoiceItems}
+          customerProfile={customerProfile}
+        />
+      )}
     </div>
   );
 }

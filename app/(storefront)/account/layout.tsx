@@ -35,7 +35,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
     checkUser();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      (event: any, session: any) => {
         if (event === "SIGNED_OUT" || !session) {
           router.push("/login");
         }

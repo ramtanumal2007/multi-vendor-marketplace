@@ -185,7 +185,7 @@ export function SellerDetailsModal({
               .select("id, full_name, phone")
               .in("id", userIds);
 
-            (profiles || []).forEach((p) => {
+            (profiles || []).forEach((p: any) => {
               profilesMap.set(p.id, { full_name: p.full_name || "", phone: p.phone || "" });
             });
           }

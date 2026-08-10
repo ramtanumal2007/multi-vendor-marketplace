@@ -56,11 +56,11 @@ export function Header() {
     fetchCategories();
 
     // Check user auth state
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(({ data }: { data: any }) => {
       setUser(data.user ? { id: data.user.id, email: data.user.email } : null);
     });
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
       setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
     });
 

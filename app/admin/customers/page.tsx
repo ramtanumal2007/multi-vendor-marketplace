@@ -75,7 +75,7 @@ export default function AdminCustomersPage() {
           { count: number; spent: number; last_order_at: string | null }
         >();
 
-        (ordersData || []).forEach((ord) => {
+        (ordersData || []).forEach((ord: any) => {
           if (ord.user_id) {
             const current = orderStatsMap.get(ord.user_id) || {
               count: 0,
@@ -91,7 +91,7 @@ export default function AdminCustomersPage() {
           }
         });
 
-        const enrichedProfiles: CustomerProfile[] = profilesData.map((p) => {
+        const enrichedProfiles: CustomerProfile[] = profilesData.map((p: any) => {
           const stats = orderStatsMap.get(p.id) || { count: 0, spent: 0, last_order_at: null };
           return {
             ...p,

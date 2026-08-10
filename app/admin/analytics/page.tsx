@@ -35,7 +35,7 @@ export default function AdminAnalyticsPage() {
         .eq("role", "customer");
 
       if (orders) {
-        const totalRevenue = orders.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
+        const totalRevenue = orders.reduce((sum: number, order: any) => sum + (Number(order.total) || 0), 0);
         const totalOrders = orders.length;
         const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
@@ -54,8 +54,8 @@ export default function AdminAnalyticsPage() {
         });
 
         const dailyRevenue = last7Days.map(dateStr => {
-          const dayOrders = orders.filter(o => o.created_at.startsWith(dateStr));
-          const rev = dayOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+          const dayOrders = orders.filter((o: any) => o.created_at.startsWith(dateStr));
+          const rev = dayOrders.reduce((sum: number, o: any) => sum + (Number(o.total) || 0), 0);
           const shortName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(new Date(dateStr));
           return { name: shortName, fullDate: dateStr, revenue: rev, orders: dayOrders.length };
         });

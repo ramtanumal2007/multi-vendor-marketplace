@@ -35,6 +35,8 @@ interface ProductItem {
   status: string;
   category_id?: string | null;
   store_id?: string | null;
+  tax_rate?: number | null;
+  delivery_fee?: number | null;
   categories?: { id: string; name: string } | null;
   stores?: { id: string; name: string } | null;
   product_images?: Array<{ id?: string; image_url: string }>;
@@ -43,8 +45,8 @@ interface ProductItem {
 export default function AdminProductsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [products, setProducts] = useState<ProductItem[]>([]);
-  const [categories, setCategories] = useState<CategoryItem[]>([]);
-  const [stores, setStores] = useState<StoreItem[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [stores, setStores] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isMetaLoading, setIsMetaLoading] = useState(true);
   const [metaError, setMetaError] = useState<string | null>(null);
@@ -68,6 +70,8 @@ export default function AdminProductsPage() {
     sku: "",
     stock_quantity: "0",
     status: "active",
+    tax_rate: "",
+    delivery_fee: "",
   });
   const [formImages, setFormImages] = useState<UploadedImageItem[]>([]);
 
@@ -136,6 +140,8 @@ export default function AdminProductsPage() {
       sku: "",
       stock_quantity: "0",
       status: "active",
+      tax_rate: "",
+      delivery_fee: "",
     });
     setFormImages([]);
   };
@@ -158,6 +164,8 @@ export default function AdminProductsPage() {
       sku: product.sku || "",
       stock_quantity: product.stock_quantity ? String(product.stock_quantity) : "0",
       status: product.status || "active",
+      tax_rate: product.tax_rate !== null && product.tax_rate !== undefined ? String(product.tax_rate) : "",
+      delivery_fee: product.delivery_fee !== null && product.delivery_fee !== undefined ? String(product.delivery_fee) : "",
     });
 
     const existingImgs: UploadedImageItem[] = (product.product_images || []).map((img) => ({
@@ -264,7 +272,7 @@ export default function AdminProductsPage() {
     const activeUrls = new Set(imageItems.map((item) => item.url));
     const pathsToRemove: string[] = [];
 
-    (currentImgs || []).forEach((row) => {
+    (currentImgs || []).forEach((row: any) => {
       if (!activeUrls.has(row.image_url)) {
         const storagePath = extractStoragePath(row.image_url);
         if (storagePath) pathsToRemove.push(storagePath);
@@ -328,6 +336,8 @@ export default function AdminProductsPage() {
         sku: validated.finalSku,
         stock_quantity: validated.stockNum,
         status: formData.status,
+        tax_rate: formData.tax_rate.trim() !== "" ? parseFloat(formData.tax_rate) : null,
+        delivery_fee: formData.delivery_fee.trim() !== "" ? parseFloat(formData.delivery_fee) : null,
       };
 
       const { data: newProd, error: insertErr } = await supabase
@@ -376,6 +386,8 @@ export default function AdminProductsPage() {
         sku: validated.finalSku,
         stock_quantity: validated.stockNum,
         status: formData.status,
+        tax_rate: formData.tax_rate.trim() !== "" ? parseFloat(formData.tax_rate) : null,
+        delivery_fee: formData.delivery_fee.trim() !== "" ? parseFloat(formData.delivery_fee) : null,
       };
 
       const { error: updateErr } = await supabase
@@ -696,6 +708,33 @@ export default function AdminProductsPage() {
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
               />
               <span className="text-[10px] text-slate-400 mt-0.5 block">Must be lower than Regular Price</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Product Tax Rate (%) (Optional)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={formData.tax_rate}
+                onChange={(e) => setFormData({ ...formData, tax_rate: e.target.value })}
+                placeholder="e.g. 5, 12, 18 (Overrides category/default)"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Custom Delivery Fee (₹) (Optional)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={formData.delivery_fee}
+                onChange={(e) => setFormData({ ...formData, delivery_fee: e.target.value })}
+                placeholder="e.g. 0 for Free Delivery or ₹40"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+              />
             </div>
           </div>
 

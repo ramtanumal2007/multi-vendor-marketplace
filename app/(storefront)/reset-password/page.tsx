@@ -20,7 +20,7 @@ export default function ResetPasswordPage() {
   const router = useRouter();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(({ data }: { data: any }) => {
       if (data.user) {
         setSessionUser(data.user.email || null);
       }

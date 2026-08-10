@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import React, { useState, useEffect } from "react";
-import { ArrowLeft, Package, Clock, CheckCircle2, Truck, XCircle, MapPin, Store } from "lucide-react";
+import { ArrowLeft, Package, Clock, CheckCircle2, Truck, XCircle, MapPin, Store, FileText, Download } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
 import {
@@ -18,12 +18,15 @@ import { useAuth } from "@/lib/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/Button";
+import { InvoiceModal } from "@/components/checkout/InvoiceModal";
 
 export default function CustomerOrderDetailsPage({ params }: { params: { id: string } }) {
   const [order, setOrder] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [timeline, setTimeline] = useState<any[]>([]);
+  const [customerProfile, setCustomerProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
   const supabase = createClient();
   const { user, isLoading: authLoading } = useAuth();
@@ -44,14 +47,14 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
         .on(
           "postgres_changes",
           { event: "INSERT", schema: "public", table: "order_timeline", filter: `order_id=eq.${params.id}` },
-          (payload) => {
+          (payload: any) => {
             setTimeline((prev) => [payload.new, ...prev]);
           }
         )
         .on(
           "postgres_changes",
           { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${params.id}` },
-          (payload) => {
+          (payload: any) => {
             setOrder(payload.new);
           }
         )
@@ -73,6 +76,15 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
     if (showLoading) setIsLoading(true);
 
     try {
+      if (user) {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .single();
+        setCustomerProfile(prof || null);
+      }
+
       // 1. Fetch Order
       const { data: orderData } = await supabase
         .from("orders")
@@ -128,11 +140,7 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
     );
   }
 
-  // Derive latest internal status and mapped customer stage
-  const latestTimelineStatus = timeline[0]?.status;
-  const currentInternalStatus = latestTimelineStatus
-    ? normalizeInternalStatus(latestTimelineStatus)
-    : normalizeInternalStatus(order.internal_status || order.fulfillment_status);
+  const currentInternalStatus = normalizeInternalStatus(order.internal_status || order.fulfillment_status);
 
   const activeCustomerStage = mapInternalToCustomerStage(currentInternalStatus);
   const isCancelled = currentInternalStatus === "CANCELLED";
@@ -144,7 +152,7 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <Link
-            href="/account"
+            href="/account/orders"
             className="p-2 border border-border rounded-lg hover:bg-background-secondary transition-colors"
           >
             <ArrowLeft className="w-4 h-4 text-foreground" />
@@ -155,6 +163,25 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
               Placed on {formatExactDateTime(order.created_at)} ({formatRelativeTime(order.created_at)})
             </p>
           </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsInvoiceOpen(true)}
+            className="font-bold text-xs h-10 border-slate-300 flex items-center gap-1.5"
+          >
+            <FileText className="w-4 h-4 text-blue-600" /> Preview Invoice
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsInvoiceOpen(true)}
+            className="font-bold text-xs h-10 bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5"
+          >
+            <Download className="w-4 h-4" /> Download Invoice
+          </Button>
         </div>
       </div>
 
@@ -380,6 +407,16 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
           </div>
         </div>
       </div>
+
+      {order && (
+        <InvoiceModal
+          isOpen={isInvoiceOpen}
+          onClose={() => setIsInvoiceOpen(false)}
+          order={order}
+          items={items}
+          customerProfile={customerProfile}
+        />
+      )}
     </div>
   );
 }

@@ -85,7 +85,7 @@ export default function AdminSellersPage() {
 
       if (sellerData && sellerData.length > 0) {
         const storeIds = sellerData
-          .map((s) => (Array.isArray(s.stores) ? s.stores[0]?.id : s.stores?.id))
+          .map((s: any) => (Array.isArray(s.stores) ? s.stores[0]?.id : s.stores?.id))
           .filter(Boolean);
 
         // 2. Fetch Product Counts per Store
@@ -95,7 +95,7 @@ export default function AdminSellersPage() {
             .from("products")
             .select("store_id");
 
-          (prodData || []).forEach((p) => {
+          (prodData || []).forEach((p: any) => {
             if (p.store_id) {
               productCountMap.set(p.store_id, (productCountMap.get(p.store_id) || 0) + 1);
             }
@@ -136,7 +136,7 @@ export default function AdminSellersPage() {
           });
         }
 
-        const enriched: EnrichedSeller[] = sellerData.map((s) => {
+        const enriched: EnrichedSeller[] = sellerData.map((s: any) => {
           const storeObj = Array.isArray(s.stores) ? s.stores[0] : s.stores;
           const storeId = storeObj?.id;
           const pCount = storeId ? productCountMap.get(storeId) || 0 : 0;

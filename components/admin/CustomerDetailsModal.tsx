@@ -99,7 +99,7 @@ export function CustomerDetailsModal({
 
       // Enrich orders with seller store info & item titles
       if (ordersData && ordersData.length > 0) {
-        const orderIds = ordersData.map((o) => o.id);
+        const orderIds = ordersData.map((o: any) => o.id);
         const { data: itemsData } = await supabase
           .from("order_items")
           .select("order_id, title, quantity, store_id, stores(id, name, seller_id)")
@@ -125,7 +125,7 @@ export function CustomerDetailsModal({
           });
         });
 
-        const enriched: EnrichedOrder[] = ordersData.map((ord) => {
+        const enriched: EnrichedOrder[] = ordersData.map((ord: any) => {
           const info = orderStoreMap.get(ord.id);
           return {
             ...ord,

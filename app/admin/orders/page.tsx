@@ -52,8 +52,8 @@ export default function AdminOrdersPage() {
       if (orderErr) throw orderErr;
 
       if (orderData && orderData.length > 0) {
-        const orderIds = orderData.map((o) => o.id);
-        const userIds = orderData.map((o) => o.user_id).filter(Boolean);
+        const orderIds = orderData.map((o: any) => o.id);
+        const userIds = orderData.map((o: any) => o.user_id).filter(Boolean);
 
         // 2. Fetch Customer Names
         let profilesMap = new Map<string, string>();
@@ -63,7 +63,7 @@ export default function AdminOrdersPage() {
             .select("id, full_name")
             .in("id", userIds);
 
-          (profiles || []).forEach((p) => {
+          (profiles || []).forEach((p: any) => {
             profilesMap.set(p.id, p.full_name || "");
           });
         }
@@ -91,13 +91,13 @@ export default function AdminOrdersPage() {
           .order("created_at", { ascending: false });
 
         const timelineMap = new Map<string, string>();
-        (timelineData || []).forEach((t) => {
+        (timelineData || []).forEach((t: any) => {
           if (!timelineMap.has(t.order_id)) {
             timelineMap.set(t.order_id, t.status);
           }
         });
 
-        const enriched: EnrichedOrder[] = orderData.map((ord) => {
+        const enriched: EnrichedOrder[] = orderData.map((ord: any) => {
           const ship = ord.shipping_address || {};
           const profileName = ord.user_id ? profilesMap.get(ord.user_id) : "";
           const customerName =
@@ -108,10 +108,7 @@ export default function AdminOrdersPage() {
           const storesSet = storeNameMap.get(ord.id);
           const storeNames = storesSet ? Array.from(storesSet).join(", ") : "N/A";
 
-          const timelineStatus = timelineMap.get(ord.id);
-          const internalStatus = timelineStatus
-            ? normalizeInternalStatus(timelineStatus)
-            : normalizeInternalStatus(ord.fulfillment_status);
+          const internalStatus = normalizeInternalStatus(ord.internal_status || ord.fulfillment_status);
 
           return {
             id: ord.id,

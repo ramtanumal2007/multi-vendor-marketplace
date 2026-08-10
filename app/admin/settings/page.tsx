@@ -171,21 +171,21 @@ export default function AdminSettingsPage() {
           </div>
         </div>
         
-        {/* Localization */}
+        {/* Localization & Tax & Delivery */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200 bg-slate-50/50">
-            <h3 className="text-lg font-semibold flex items-center gap-2"><Settings className="w-5 h-5 text-slate-500" /> Localization & Tax</h3>
-            <p className="text-sm text-slate-500 mt-1">Configure currency and tax rules.</p>
+            <h3 className="text-lg font-semibold flex items-center gap-2"><Settings className="w-5 h-5 text-slate-500" /> Tax & Delivery Rules</h3>
+            <p className="text-sm text-slate-500 mt-1">Configure global tax rate defaults and order free delivery threshold.</p>
           </div>
           <div className="p-6 flex flex-col gap-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium text-slate-700">Currency Code</label>
                 <input 
                   type="text" 
                   name="currency_code"
-                  placeholder="USD"
-                  value={settings.currency_code || ""}
+                  placeholder="INR"
+                  value={settings.currency_code || "INR"}
                   onChange={handleChange}
                   className="w-full px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all"
                 />
@@ -195,34 +195,34 @@ export default function AdminSettingsPage() {
                 <input 
                   type="text" 
                   name="currency_symbol"
-                  placeholder="$"
-                  value={settings.currency_symbol || ""}
+                  placeholder="₹"
+                  value={settings.currency_symbol || "₹"}
                   onChange={handleChange}
                   className="w-full px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all"
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-slate-700">Tax Rate (%)</label>
+                <label className="text-sm font-medium text-slate-700">Global Default Tax (%)</label>
                 <input 
                   type="number" 
-                  name="tax_rate"
-                  value={settings.tax_rate || 0}
+                  name="default_tax_rate"
+                  placeholder="0"
+                  value={settings.default_tax_rate ?? settings.tax_rate ?? 0}
                   onChange={handleChange}
                   className="w-full px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all"
                 />
               </div>
-            </div>
-            
-            <div className="flex items-center gap-3 mt-2">
-              <input 
-                type="checkbox" 
-                id="tax_inclusive"
-                name="tax_inclusive"
-                checked={!!settings.tax_inclusive}
-                onChange={handleChange}
-                className="w-4 h-4 rounded border-slate-300 text-accent focus:ring-accent"
-              />
-              <label htmlFor="tax_inclusive" className="text-sm font-medium text-slate-700">Prices are tax inclusive</label>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium text-slate-700">Free Delivery Order Minimum (₹)</label>
+                <input 
+                  type="number" 
+                  name="free_delivery_threshold"
+                  placeholder="500"
+                  value={settings.free_delivery_threshold ?? 500}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all"
+                />
+              </div>
             </div>
           </div>
         </div>

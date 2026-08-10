@@ -21,7 +21,7 @@ export default function AccountDashboard() {
   const supabase = createClient();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(({ data }: { data: any }) => {
       if (data.user) {
         setUser(data.user);
         fetchOrders(data.user.id);

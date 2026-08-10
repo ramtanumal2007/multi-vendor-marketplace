@@ -82,7 +82,7 @@ export function SellerNotificationCenter({ sellerId }: SellerNotificationCenterP
           table: "seller_notifications",
           filter: `seller_id=eq.${sellerId}`,
         },
-        (payload) => {
+        (payload: any) => {
           const newNotif = payload.new as SellerNotification;
           setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
         }
@@ -95,7 +95,7 @@ export function SellerNotificationCenter({ sellerId }: SellerNotificationCenterP
           table: "seller_notifications",
           filter: `seller_id=eq.${sellerId}`,
         },
-        (payload) => {
+        (payload: any) => {
           const updatedNotif = payload.new as SellerNotification;
           setNotifications((prev) =>
             prev.map((n) => (n.id === updatedNotif.id ? { ...n, ...updatedNotif } : n))

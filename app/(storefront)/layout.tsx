@@ -14,9 +14,9 @@ export default function StorefrontLayout({
   return (
     <AuthProvider>
       <CartProvider>
-        <div className="relative min-h-screen flex flex-col pt-[80px]">
+        <div className="relative min-h-screen flex flex-col pt-[60px]">
         <Header />
-        <main className="flex-1 flex flex-col relative">{children}</main>
+        <main className="flex-1 flex flex-col relative overflow-x-hidden">{children}</main>
         <Footer />
         <CartDrawer />
         <ToastContainer />

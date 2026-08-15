@@ -22,6 +22,7 @@ import { ToastContainer } from "@/components/ui/Toast";
 
 const ADMIN_LINKS = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
+  { label: "Homepage Control", href: "/admin/homepage", icon: LayoutDashboard },
   { label: "Products", href: "/admin/products", icon: Package },
   { label: "Categories", href: "/admin/categories", icon: Tags },
   { label: "Orders", href: "/admin/orders", icon: ShoppingCart },

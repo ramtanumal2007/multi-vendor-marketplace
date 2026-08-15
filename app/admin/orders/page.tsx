@@ -17,6 +17,8 @@ import { Button } from "@/components/ui/Button";
 interface EnrichedOrder {
   id: string;
   order_number: string;
+  invoice_number?: string;
+  customer_id_code?: string;
   total: number;
   payment_status: string;
   fulfillment_status: string;
@@ -46,7 +48,7 @@ export default function AdminOrdersPage() {
       // 1. Fetch Orders
       const { data: orderData, error: orderErr } = await supabase
         .from("orders")
-        .select("id, order_number, user_id, email, shipping_address, total, payment_status, fulfillment_status, created_at")
+        .select("id, order_number, invoice_number, user_id, email, shipping_address, total, payment_status, fulfillment_status, created_at")
         .order("created_at", { ascending: false });
 
       if (orderErr) throw orderErr;
@@ -55,16 +57,19 @@ export default function AdminOrdersPage() {
         const orderIds = orderData.map((o: any) => o.id);
         const userIds = orderData.map((o: any) => o.user_id).filter(Boolean);
 
-        // 2. Fetch Customer Names
-        let profilesMap = new Map<string, string>();
+        // 2. Fetch Customer Names & Customer Code
+        let profilesMap = new Map<string, { name: string; code: string }>();
         if (userIds.length > 0) {
           const { data: profiles } = await supabase
             .from("profiles")
-            .select("id, full_name")
+            .select("id, full_name, customer_id_code")
             .in("id", userIds);
 
           (profiles || []).forEach((p: any) => {
-            profilesMap.set(p.id, p.full_name || "");
+            profilesMap.set(p.id, {
+              name: p.full_name || "",
+              code: p.customer_id_code || "",
+            });
           });
         }
 
@@ -99,9 +104,9 @@ export default function AdminOrdersPage() {
 
         const enriched: EnrichedOrder[] = orderData.map((ord: any) => {
           const ship = ord.shipping_address || {};
-          const profileName = ord.user_id ? profilesMap.get(ord.user_id) : "";
+          const profileObj = ord.user_id ? profilesMap.get(ord.user_id) : null;
           const customerName =
-            profileName ||
+            profileObj?.name ||
             `${ship.first_name || ""} ${ship.last_name || ""}`.trim() ||
             "Guest Customer";
 
@@ -113,6 +118,8 @@ export default function AdminOrdersPage() {
           return {
             id: ord.id,
             order_number: ord.order_number,
+            invoice_number: ord.invoice_number || `INV-${ord.order_number.replace("ORD-", "")}`,
+            customer_id_code: profileObj?.code || "CUS-001",
             total: Number(ord.total || 0),
             payment_status: ord.payment_status,
             fulfillment_status: ord.fulfillment_status,
@@ -255,7 +262,12 @@ export default function AdminOrdersPage() {
               <tbody className="divide-y divide-slate-200 text-xs">
                 {filteredOrders.map((order) => (
                   <tr key={order.id} className="hover:bg-slate-50/80 transition-colors group">
-                    <td className="px-6 py-4 font-bold text-slate-900">#{order.order_number}</td>
+                    <td className="px-6 py-4">
+                      <div className="font-bold text-slate-900 text-sm">#{order.order_number}</div>
+                      <div className="text-[11px] font-mono text-slate-500 mt-0.5 font-bold">
+                        {order.invoice_number}
+                      </div>
+                    </td>
 
                     <td className="px-6 py-4 text-slate-600">
                       <div className="font-semibold text-slate-800">{formatExactDateTime(order.created_at)}</div>
@@ -265,8 +277,11 @@ export default function AdminOrdersPage() {
                     <td className="px-6 py-4 text-slate-600">
                       <div className="flex flex-col">
                         <span className="font-bold text-slate-800 flex items-center gap-1">
-                          <User className="w-3.5 h-3.5 text-slate-400" />
+                          <User className="w-3.5 h-3.5 text-blue-600" />
                           {order.customer_name}
+                        </span>
+                        <span className="text-[11px] font-mono text-blue-700 font-bold">
+                          {order.customer_id_code}
                         </span>
                         <span className="text-[11px] text-slate-400">{order.customer_email}</span>
                       </div>

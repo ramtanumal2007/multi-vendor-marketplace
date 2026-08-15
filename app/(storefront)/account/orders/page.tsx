@@ -105,7 +105,12 @@ export default function OrdersPage() {
               ) : (
                 orders.map((order) => (
                   <tr key={order.id} className="border-t border-border hover:bg-background-secondary/50 transition-colors">
-                    <td className="px-6 py-4 font-medium text-foreground">#{order.order_number}</td>
+                    <td className="px-6 py-4">
+                      <div className="font-medium text-foreground">#{order.order_number}</div>
+                      <div className="text-[11px] font-mono text-foreground-secondary">
+                        {order.invoice_number || `INV-${(order.order_number || "").replace("ORD-", "")}`}
+                      </div>
+                    </td>
                     <td className="px-6 py-4 text-foreground-secondary">{formatDate(order.created_at)}</td>
                     <td className="px-6 py-4">
                       {(() => {

@@ -26,7 +26,7 @@ export function InvoiceModal({ isOpen, onClose, order, items, customerProfile }:
 
   const invoiceNumber =
     order.invoice_number ||
-    `INV-${new Date(order.created_at || Date.now()).toISOString().slice(0, 10).replace(/-/g, "")}-${(order.id || "").slice(0, 5).toUpperCase()}`;
+    (order.order_number ? `INV-${order.order_number.replace("ORD-", "")}` : "INV-10007");
 
   const customerName =
     customerProfile?.full_name ||
@@ -34,7 +34,8 @@ export function InvoiceModal({ isOpen, onClose, order, items, customerProfile }:
     order.email ||
     "Valued Customer";
 
-  const customerCode = customerProfile?.customer_id_code || `CUS-${(order.user_id || order.id || "").slice(0, 6).toUpperCase()}`;
+  const customerCode =
+    customerProfile?.customer_id_code || order.customer_id_code || "CUS-001";
 
   const handlePrint = () => {
     window.print();
@@ -189,37 +190,41 @@ export function InvoiceModal({ isOpen, onClose, order, items, customerProfile }:
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-slate-200">
                   <tr>
-                    <th className="px-4 py-3">#</th>
+                    <th className="px-4 py-3">Item ID</th>
                     <th className="px-4 py-3">Product Description</th>
+                    <th className="px-4 py-3">SKU</th>
                     <th className="px-4 py-3 text-center">Qty</th>
                     <th className="px-4 py-3 text-right">Unit Price</th>
                     <th className="px-4 py-3 text-right">Line Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {items.map((item: any, idx: number) => (
-                    <tr key={item.id || idx}>
-                      <td className="px-4 py-3 text-slate-400 font-mono">{idx + 1}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-900">
-                        {item.title}
-                        {item.variant_info && (
-                          <span className="block text-[11px] font-normal text-slate-500">
-                            {item.variant_info}
-                          </span>
-                        )}
-                        {item.stores?.name && (
-                          <span className="inline-block text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mt-0.5 font-medium">
-                            Seller: {item.stores.name}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-center font-bold text-slate-700">{item.quantity}</td>
-                      <td className="px-4 py-3 text-right font-mono">{formatCurrency(item.unit_price)}</td>
-                      <td className="px-4 py-3 text-right font-mono font-bold text-slate-900">
-                        {formatCurrency(item.line_total)}
-                      </td>
-                    </tr>
-                  ))}
+                  {items.map((item: any, idx: number) => {
+                    const itemCode =
+                      item.order_item_code ||
+                      `OI-${(order.order_number || "10000").replace("ORD-", "")}-${String(idx + 1).padStart(3, "0")}`;
+                    const itemSku = item.sku || item.products?.sku || "N/A";
+
+                    return (
+                      <tr key={item.id || idx}>
+                        <td className="px-4 py-3 text-slate-900 font-mono font-bold">{itemCode}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-900">
+                          {item.title}
+                          {item.variant_info && (
+                            <span className="block text-[11px] font-normal text-slate-500">
+                              {item.variant_info}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 font-mono text-[11px]">{itemSku}</td>
+                        <td className="px-4 py-3 text-center font-bold text-slate-700">{item.quantity}</td>
+                        <td className="px-4 py-3 text-right font-mono">{formatCurrency(item.unit_price)}</td>
+                        <td className="px-4 py-3 text-right font-mono font-bold text-slate-900">
+                          {formatCurrency(item.line_total)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

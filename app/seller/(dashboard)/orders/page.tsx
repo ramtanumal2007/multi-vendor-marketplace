@@ -18,6 +18,8 @@ import {
   RefreshCw,
   Eye,
   ShieldAlert,
+  Copy,
+  Check,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
@@ -27,11 +29,15 @@ import {
   formatExactDateTime,
   formatRelativeTime,
   normalizeInternalStatus,
+  formatOrderItemId,
 } from "@/lib/utils";
 
 interface SellerOrderItem {
   id: string;
+  order_item_code?: string;
+  product_id?: string;
   title: string;
+  sku?: string;
   quantity: number;
   unit_price: number;
   line_total: number;
@@ -58,6 +64,29 @@ export default function SellerOrdersPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedOrder, setSelectedOrder] = useState<SellerOrder | null>(null);
 
+  // Product Click Drawer/Modal state
+  const [isProductDrawerOpen, setIsProductDrawerOpen] = useState(false);
+  const [productContext, setProductContext] = useState<any>(null);
+  const [productDetails, setProductDetails] = useState<any>(null);
+  const [isLoadingProductDetails, setIsLoadingProductDetails] = useState(false);
+  const [productFetchError, setProductFetchError] = useState<string | null>(null);
+  const [copiedSku, setCopiedSku] = useState(false);
+  const [copiedProductId, setCopiedProductId] = useState(false);
+
+  const handleCopySku = (skuText: string) => {
+    if (!skuText || skuText === "N/A") return;
+    navigator.clipboard.writeText(skuText);
+    setCopiedSku(true);
+    setTimeout(() => setCopiedSku(false), 2000);
+  };
+
+  const handleCopyProductId = (idText: string) => {
+    if (!idText || idText === "N/A") return;
+    navigator.clipboard.writeText(idText);
+    setCopiedProductId(true);
+    setTimeout(() => setCopiedProductId(false), 2000);
+  };
+
   // Custom Note Input State
   const [customNote, setCustomNote] = useState("");
   const [isPostingNote, setIsPostingNote] = useState(false);
@@ -65,6 +94,56 @@ export default function SellerOrdersPage() {
 
   const supabase = createClient();
   const { addToast } = useToast();
+
+  const handleProductClick = async (orderItemId?: string, context?: any) => {
+    setIsProductDrawerOpen(true);
+    setProductContext(context || {});
+    setProductFetchError(null);
+    setProductDetails(null);
+
+    if (!orderItemId) {
+      setProductFetchError("Order item ID is not available.");
+      return;
+    }
+
+    setIsLoadingProductDetails(true);
+    try {
+      const { data, error } = await supabase.rpc("get_seller_order_product_details", {
+        p_order_item_id: orderItemId,
+      });
+
+      if (error) {
+        setProductFetchError(error.message || "Failed to fetch seller store product details.");
+      } else if (data && data.success === false) {
+        setProductFetchError(data.error || "Order item does not belong to your seller store.");
+      } else if (data) {
+        setProductDetails(data);
+      }
+    } catch (err: any) {
+      setProductFetchError(err.message || "Failed to load product listing details.");
+    } finally {
+      setIsLoadingProductDetails(false);
+    }
+  };
+
+  const closeProductDrawer = () => {
+    setIsProductDrawerOpen(false);
+    setProductContext(null);
+    setProductDetails(null);
+    setIsLoadingProductDetails(false);
+    setProductFetchError(null);
+  };
+
+  // Keyboard ESC support for Product Drawer
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isProductDrawerOpen) {
+        closeProductDrawer();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isProductDrawerOpen]);
 
   useEffect(() => {
     fetchSellerOrders();
@@ -141,7 +220,7 @@ export default function SellerOrdersPage() {
       const { data: itemsData } = await supabase
         .from("order_items")
         .select(
-          "id, order_id, title, quantity, unit_price, line_total, orders(id, order_number, user_id, payment_status, fulfillment_status, internal_status, created_at)"
+          "id, order_id, order_item_code, product_id, title, sku, quantity, unit_price, line_total, orders(id, order_number, user_id, payment_status, fulfillment_status, internal_status, created_at)"
         )
         .eq("store_id", storeData.id);
 
@@ -155,7 +234,10 @@ export default function SellerOrdersPage() {
           const current = orderMap.get(ord.id) || { ord, items: [], total: 0 };
           current.items.push({
             id: item.id,
+            order_item_code: item.order_item_code,
+            product_id: item.product_id,
             title: item.title,
+            sku: item.sku,
             quantity: item.quantity,
             unit_price: Number(item.unit_price || 0),
             line_total: Number(item.line_total || 0),
@@ -455,13 +537,46 @@ export default function SellerOrdersPage() {
                       </td>
 
                       <td className="p-4 align-top text-xs">
-                        <div className="space-y-1">
-                          {ord.items.map((item) => (
-                            <div key={item.id} className="text-slate-800">
-                              <span className="font-semibold">{item.title}</span>{" "}
-                              <span className="text-slate-500 font-bold">x{item.quantity}</span>
-                            </div>
-                          ))}
+                        <div className="space-y-2">
+                          {ord.items.map((item, idx) => {
+                            const itemCode =
+                              item.order_item_code ||
+                              formatOrderItemId(item.id, ord.order_number, idx);
+                            const itemSku = item.sku || "N/A";
+
+                            return (
+                              <div key={item.id} className="text-slate-800 border-b border-slate-100 last:border-0 pb-1.5 last:pb-0">
+                                <div className="flex items-center gap-1.5 font-mono text-[10px] text-blue-700 font-bold">
+                                  <span>{itemCode}</span>
+                                  <span className="text-slate-400">|</span>
+                                  <span className="text-slate-500 font-normal">SKU: {itemSku}</span>
+                                </div>
+                                <div className="mt-0.5">
+                                  <button
+                                    onClick={() =>
+                                      handleProductClick(item.id, {
+                                        orderItemCode: itemCode,
+                                        orderNumber: ord.order_number,
+                                        orderItemTitle: item.title,
+                                        orderItemPrice: item.unit_price,
+                                        quantity: item.quantity,
+                                        sku: itemSku,
+                                        productId: item.product_id,
+                                      })
+                                    }
+                                    className="font-bold text-slate-900 hover:text-blue-600 hover:underline text-left cursor-pointer transition-colors"
+                                    title="Click to view product details"
+                                  >
+                                    {item.title}
+                                  </button>{" "}
+                                  <span className="text-slate-500 font-bold">x{item.quantity}</span>
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  {formatCurrency(item.unit_price)} / unit
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </td>
 
@@ -624,19 +739,47 @@ export default function SellerOrdersPage() {
                   Purchased Products
                 </h3>
                 <div className="divide-y divide-slate-200">
-                  {selectedOrder.items.map((item) => (
-                    <div key={item.id} className="py-2 flex justify-between items-center text-xs">
-                      <div>
-                        <span className="font-bold text-slate-800">{item.title}</span>
-                        <span className="text-slate-500 block text-[11px]">
-                          Qty: {item.quantity} × {formatCurrency(item.unit_price)}
+                  {selectedOrder.items.map((item, idx) => {
+                    const itemCode =
+                      item.order_item_code ||
+                      formatOrderItemId(item.id, selectedOrder.order_number, idx);
+                    const itemSku = item.sku || "N/A";
+
+                    return (
+                      <div key={item.id} className="py-2.5 flex justify-between items-center text-xs">
+                        <div>
+                          <div className="flex items-center gap-1.5 font-mono text-[10px] text-blue-700 font-bold mb-0.5">
+                            <span>{itemCode}</span>
+                            <span className="text-slate-400">|</span>
+                            <span className="text-slate-500 font-normal">SKU: {itemSku}</span>
+                          </div>
+                          <button
+                            onClick={() =>
+                              handleProductClick(item.id, {
+                                orderItemCode: itemCode,
+                                orderNumber: selectedOrder.order_number,
+                                orderItemTitle: item.title,
+                                orderItemPrice: item.unit_price,
+                                quantity: item.quantity,
+                                sku: itemSku,
+                                productId: item.product_id,
+                              })
+                            }
+                            className="font-bold text-slate-800 hover:text-blue-600 hover:underline text-left text-xs cursor-pointer transition-colors"
+                            title="Click to view product details"
+                          >
+                            {item.title}
+                          </button>
+                          <span className="text-slate-500 block text-[11px] mt-0.5">
+                            Qty: {item.quantity} × {formatCurrency(item.unit_price)}
+                          </span>
+                        </div>
+                        <span className="font-bold text-slate-900 text-sm">
+                          {formatCurrency(item.line_total)}
                         </span>
                       </div>
-                      <span className="font-bold text-slate-900">
-                        {formatCurrency(item.line_total)}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -746,6 +889,244 @@ export default function SellerOrdersPage() {
             {/* Footer */}
             <div className="flex justify-end pt-3 border-t border-slate-100 flex-shrink-0">
               <Button variant="outline" size="sm" onClick={() => setSelectedOrder(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Seller Product Details Drawer / Modal */}
+      {isProductDrawerOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end items-end sm:items-stretch bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          {/* Overlay backdrop click to close */}
+          <div
+            className="absolute inset-0 -z-10"
+            onClick={closeProductDrawer}
+            aria-label="Close product drawer overlay"
+          />
+
+          {/* Drawer Container: Responsive Right-side drawer on desktop, bottom sheet on mobile */}
+          <div className="bg-white w-full sm:max-w-md h-[90vh] sm:h-full border-t sm:border-t-0 sm:border-l border-slate-200 shadow-2xl flex flex-col overflow-hidden rounded-t-2xl sm:rounded-none animate-in slide-in-from-bottom sm:slide-in-from-right duration-300 relative z-10">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-100 flex items-start justify-between bg-slate-50/50 flex-shrink-0">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded">
+                  Seller Store Product
+                </span>
+                <h3 className="font-bold text-slate-900 text-base sm:text-lg mt-1 line-clamp-1">
+                  {productDetails?.product_name || productContext?.orderItemTitle || "Product Details"}
+                </h3>
+              </div>
+              <button
+                onClick={closeProductDrawer}
+                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition-colors ml-2"
+                aria-label="Close Drawer"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              {isLoadingProductDetails ? (
+                <div className="py-24 flex flex-col items-center justify-center space-y-3 text-slate-400">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  <span className="text-xs font-semibold text-slate-500">Loading store listing details...</span>
+                </div>
+              ) : productFetchError ? (
+                <div className="py-12 px-4 flex flex-col items-center justify-center text-center space-y-3 bg-red-50/50 rounded-2xl border border-red-100">
+                  <ShieldAlert className="w-10 h-10 text-red-500" />
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-red-900 text-sm">Product Not Available</h4>
+                    <p className="text-xs text-red-600 max-w-xs">{productFetchError}</p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Historical Snapshot Warning if product listing is inactive/deleted */}
+                  {productDetails?.product_exists === false && (
+                    <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3 text-xs text-amber-900">
+                      <ShieldAlert className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                      <div>
+                        <span className="font-bold block">Live Product Listing Unavailable</span>
+                        <span className="text-[11px] text-amber-800">
+                          Showing historical purchase-time snapshot recorded for this order item.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Product Image Display */}
+                  <div className="w-full h-52 bg-slate-100/80 rounded-2xl overflow-hidden flex items-center justify-center border border-slate-200 relative p-2">
+                    {productDetails?.image_url ? (
+                      <img
+                        src={productDetails.image_url}
+                        alt={productDetails?.product_name || "Product"}
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center space-y-2 text-slate-400">
+                        <Package className="w-12 h-12 stroke-[1.5]" />
+                        <span className="text-[11px] font-medium">No product image available</span>
+                      </div>
+                    )}
+
+                    <span
+                      className={`absolute top-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-bold shadow-xs border ${
+                        productDetails?.is_active
+                          ? "bg-emerald-500 text-white border-emerald-400"
+                          : "bg-slate-700 text-white border-slate-600"
+                      }`}
+                    >
+                      {productDetails?.product_exists
+                        ? productDetails?.is_active
+                          ? "Active Listing"
+                          : "Inactive"
+                        : "Snapshot Only"}
+                    </span>
+                  </div>
+
+                  {/* Pricing & Order Context Banner */}
+                  <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-semibold text-slate-500">Unit Purchase Price</span>
+                      <span className="font-extrabold text-slate-900 text-lg">
+                        {formatCurrency(productDetails?.unit_price ?? productContext?.orderItemPrice ?? 0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Associated Order Item Context */}
+                  <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-2xl space-y-1 text-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 block">
+                      Associated Order Context
+                    </span>
+                    <div className="flex items-center justify-between font-mono text-slate-800">
+                      <span className="font-bold text-blue-900">
+                        Order: {productDetails?.order_number || productContext?.orderNumber}
+                      </span>
+                      <span className="font-bold text-slate-700">
+                        Item ID: {productDetails?.order_item_code || productContext?.orderItemCode}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Product Specifications Grid */}
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Product & Store Inventory Specs
+                    </h4>
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      {/* Full SKU with Copy Button */}
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 space-y-1 col-span-2 sm:col-span-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400 text-[11px] font-medium">SKU</span>
+                          {(productDetails?.sku || productContext?.sku) && (
+                            <button
+                              onClick={() =>
+                                handleCopySku(productDetails?.sku || productContext?.sku || "")
+                              }
+                              className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                              title="Copy complete SKU"
+                            >
+                              {copiedSku ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  <span className="text-emerald-700 font-bold">Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3 text-blue-600" />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                        <span className="font-mono font-bold text-slate-900 text-xs break-all block leading-tight">
+                          {productDetails?.sku || productContext?.sku || "N/A"}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 space-y-0.5">
+                        <span className="text-slate-400 text-[11px] font-medium block">Category</span>
+                        <span className="font-bold text-slate-800 truncate block">
+                          {productDetails?.category_name || "General"}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 space-y-0.5">
+                        <span className="text-slate-400 text-[11px] font-medium block">Store Name</span>
+                        <span className="font-bold text-blue-900 text-xs truncate block">
+                          {productDetails?.store_name || "Seller Store"}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 space-y-0.5">
+                        <span className="text-slate-400 text-[11px] font-medium block">Ordered Quantity</span>
+                        <span className="font-bold text-slate-900 text-xs block">
+                          {productDetails?.ordered_quantity ?? productContext?.quantity ?? 1} units
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 space-y-0.5">
+                        <span className="text-slate-400 text-[11px] font-medium block">Current Stock</span>
+                        <span className="font-bold text-emerald-700 text-xs block">
+                          {productDetails?.product_exists
+                            ? `${productDetails?.current_stock ?? "0"} units`
+                            : "N/A (Historical)"}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 space-y-0.5">
+                        <span className="text-slate-400 text-[11px] font-medium block">Product Status</span>
+                        <span className="font-bold text-slate-800 text-xs truncate block capitalize">
+                          {productDetails?.status || "active"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Product ID Section with Full UUID and Copy Button */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200/70 rounded-xl space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-slate-500">Product ID</span>
+                      {(productDetails?.product_id || productContext?.productId) && (
+                        <button
+                          onClick={() =>
+                            handleCopyProductId(
+                              productDetails?.product_id || productContext?.productId || ""
+                            )
+                          }
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded transition-colors cursor-pointer"
+                          title="Copy full Product ID"
+                        >
+                          {copiedProductId ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              <span className="text-emerald-700 font-bold">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 text-blue-600" />
+                              <span>Copy ID</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    <div className="font-mono font-bold text-slate-800 text-xs break-all leading-normal bg-white p-2.5 rounded-lg border border-slate-200 select-all">
+                      {productDetails?.product_id || productContext?.productId || "N/A"}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Drawer Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex justify-end flex-shrink-0">
+              <Button variant="outline" size="sm" onClick={closeProductDrawer} className="h-9 px-5 font-bold text-xs">
                 Close
               </Button>
             </div>

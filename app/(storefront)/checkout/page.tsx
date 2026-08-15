@@ -29,9 +29,16 @@ import {
   Briefcase,
   MapPinOff,
   Compass,
+  Tag,
+  TicketPercent,
+  Receipt,
+  X,
+  Sparkles,
+  Zap,
+  Percent,
 } from "lucide-react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
 
 // Dynamic import for client-only Leaflet map
@@ -78,7 +85,11 @@ const DEFAULT_CITIES: CityRule[] = [
 ];
 
 export default function CheckoutPage() {
-  const { items, subtotal, clearCart } = useCart();
+  const { items, buyNowItem, clearCart, clearBuyNowItem } = useCart();
+  const searchParams = useSearchParams();
+  const isBuyNow = searchParams.get("mode") === "buy_now" || Boolean(buyNowItem);
+  const checkoutItems = isBuyNow && buyNowItem ? [buyNowItem] : items;
+
   const [currentStep, setCurrentStep] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
@@ -94,6 +105,23 @@ export default function CheckoutPage() {
   const [productDeliveryMap, setProductDeliveryMap] = useState<Map<string, number>>(new Map());
   const [globalTaxRate, setGlobalTaxRate] = useState(0);
   const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState(500);
+
+  // Coupon System State (Phase 5, 6, 7)
+  const [couponInput, setCouponInput] = useState("");
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
+  const [appliedCoupon, setAppliedCoupon] = useState<{
+    id?: string;
+    code: string;
+    type: string;
+    value: number;
+  } | null>(null);
+  const [couponDiscountAmount, setCouponDiscountAmount] = useState(0);
+  const [couponMessage, setCouponMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
+  // Available Coupons State (Requirement 3)
+  const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
+  const [otherCoupons, setOtherCoupons] = useState<any[]>([]);
+  const [isLoadingAvailableCoupons, setIsLoadingAvailableCoupons] = useState(false);
 
   // Geocoding Search State
   const [locationSearch, setLocationSearch] = useState("");
@@ -285,8 +313,18 @@ export default function CheckoutPage() {
     return () => clearTimeout(timer);
   }, [locationSearch, form.city, cityRules]);
 
+  // Price Details Calculation (Requirements 1, 4 & 5)
+  const itemsMRP = checkoutItems.reduce((acc, item) => acc + (item.mrp || item.price) * item.quantity, 0);
+  const productDiscountTotal = checkoutItems.reduce(
+    (acc, item) => acc + Math.max(0, (item.mrp || item.price) - item.price) * item.quantity,
+    0
+  );
+  const cartItemSubtotal = checkoutItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
+  const subtotalAfterCoupon = Math.max(0, cartItemSubtotal - couponDiscountAmount);
+  const totalSavings = productDiscountTotal + couponDiscountAmount;
+
   // Calculate Admin-driven Tax & Delivery Charge
-  const calculatedTax = items.reduce((acc, item) => {
+  const calculatedTax = checkoutItems.reduce((acc, item) => {
     const rate = productTaxMap.get(item.productId) ?? globalTaxRate;
     const itemTotal = item.price * item.quantity;
     return acc + (itemTotal * rate) / 100;
@@ -299,11 +337,11 @@ export default function CheckoutPage() {
 
   let calculatedDeliveryFee = selectedCityRule.delivery_fee;
 
-  if (subtotal >= freeDeliveryThreshold && freeDeliveryThreshold > 0) {
+  if (cartItemSubtotal >= freeDeliveryThreshold && freeDeliveryThreshold > 0) {
     calculatedDeliveryFee = 0;
   } else {
     let maxProductFee: number | null = null;
-    items.forEach((item) => {
+    checkoutItems.forEach((item) => {
       const pFee = productDeliveryMap.get(item.productId);
       if (pFee !== undefined && pFee !== null) {
         if (maxProductFee === null || pFee > maxProductFee) {
@@ -317,7 +355,102 @@ export default function CheckoutPage() {
     }
   }
 
-  const grandTotal = subtotal + calculatedTax + calculatedDeliveryFee;
+  const grandTotal = subtotalAfterCoupon + calculatedTax + calculatedDeliveryFee;
+
+  // Available Coupons Fetcher (Requirement 3)
+  useEffect(() => {
+    if (checkoutItems.length === 0) return;
+    async function fetchAvailableCoupons() {
+      setIsLoadingAvailableCoupons(true);
+      try {
+        const res = await fetch("/api/coupons/available", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subtotal: cartItemSubtotal,
+            items: checkoutItems,
+          }),
+        });
+        const data = await res.json();
+        if (data) {
+          setAvailableCoupons(data.applicableCoupons || []);
+          setOtherCoupons(data.otherCoupons || []);
+        }
+      } catch (err) {
+        console.error("Error fetching available coupons:", err);
+      } finally {
+        setIsLoadingAvailableCoupons(false);
+      }
+    }
+    fetchAvailableCoupons();
+  }, [cartItemSubtotal, checkoutItems.length]);
+
+  // Coupon Handlers (Phase 5, 7 & Requirement 2, 3)
+  const handleApplyCoupon = async (e?: React.FormEvent | string) => {
+    let codeToUse = "";
+    if (typeof e === "string") {
+      codeToUse = e.trim();
+    } else if (e) {
+      e.preventDefault();
+      codeToUse = couponInput.trim();
+    } else {
+      codeToUse = couponInput.trim();
+    }
+
+    if (!codeToUse) {
+      setCouponMessage({ text: "Please enter a coupon code.", type: "error" });
+      return;
+    }
+
+    setCouponInput(codeToUse.toUpperCase());
+    setIsValidatingCoupon(true);
+    setCouponMessage(null);
+
+    try {
+      const res = await fetch("/api/coupons/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: codeToUse,
+          subtotal: cartItemSubtotal,
+          items: checkoutItems,
+          userId: user?.id,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.valid) {
+        setAppliedCoupon(data.coupon);
+        setCouponDiscountAmount(data.discountAmount);
+        setCouponMessage({
+          text: data.message || `Coupon ${data.coupon.code} applied! Saved ${formatCurrency(data.discountAmount)}`,
+          type: "success",
+        });
+        addToast({
+          title: "Coupon Applied",
+          description: `Saved ${formatCurrency(data.discountAmount)} on your order!`,
+          type: "success",
+        });
+      } else {
+        setAppliedCoupon(null);
+        setCouponDiscountAmount(0);
+        setCouponMessage({ text: data.message || "Invalid coupon code.", type: "error" });
+        addToast({ title: "Coupon Error", description: data.message || "Invalid coupon code.", type: "error" });
+      }
+    } catch (err: any) {
+      setCouponMessage({ text: "Failed to validate coupon code.", type: "error" });
+    } finally {
+      setIsValidatingCoupon(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponDiscountAmount(0);
+    setCouponInput("");
+    setCouponMessage(null);
+    addToast({ title: "Coupon Removed", description: "Coupon discount removed.", type: "info" });
+  };
 
   const validateAddressForm = (): boolean => {
     const newErrors: {
@@ -536,7 +669,7 @@ export default function CheckoutPage() {
     await reverseGeocode(lat, lng);
   };
 
-  // Single Order Creation Handler
+  // Single Order Creation Handler via Secure Server API (Phase 8 & 9)
   const handlePlaceOrder = async () => {
     if (isSubmittingRef.current || isProcessing) return;
     isSubmittingRef.current = true;
@@ -575,57 +708,38 @@ export default function CheckoutPage() {
         postal_code: form.postalCode.trim(),
         address_tag: form.addressTag,
         country: "IN",
+        email: form.email.trim() || user?.email,
       };
 
-      const initialPaymentStatus = "pending";
-
-      // Insert single order into Supabase
-      const { data: orderData, error: orderError } = await supabase
-        .from("orders")
-        .insert({
-          user_id: user?.id,
+      const response = await fetch("/api/orders/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user?.id,
           email: form.email.trim() || user?.email,
-          shipping_address: shippingAddress,
-          billing_address: shippingAddress,
-          shipping_method: `${selectedCityRule.name} Delivery`,
-          shipping_cost: calculatedDeliveryFee,
-          subtotal: subtotal,
-          tax_amount: calculatedTax,
-          total: grandTotal,
-          payment_method: form.paymentMethod,
-          payment_status: initialPaymentStatus,
-          fulfillment_status: "pending",
-          internal_status: "ORDERED",
-        })
-        .select()
-        .single();
+          shippingAddress,
+          paymentMethod: form.paymentMethod,
+          shippingMethod: `${selectedCityRule.name} Delivery`,
+          shippingCost: calculatedDeliveryFee,
+          cityRuleName: selectedCityRule.name,
+          items: checkoutItems,
+          couponCode: appliedCoupon ? appliedCoupon.code : null,
+        }),
+      });
 
-      if (orderError || !orderData) {
-        throw new Error(orderError?.message || "Failed to create order record.");
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.message || "Failed to process order.");
       }
 
-      const productIds = items.map((i) => i.productId);
-      const { data: productsData } = await supabase
-        .from("products")
-        .select("id, store_id")
-        .in("id", productIds);
+      if (isBuyNow) {
+        clearBuyNowItem();
+      } else {
+        clearCart();
+      }
 
-      const productStoreMap = new Map(productsData?.map((p: any) => [p.id, p.store_id]) || []);
-
-      const orderItems = items.map((item) => ({
-        order_id: orderData.id,
-        product_id: item.productId,
-        store_id: productStoreMap.get(item.productId) || null,
-        title: item.title,
-        quantity: item.quantity,
-        unit_price: item.price,
-        line_total: item.price * item.quantity,
-      }));
-
-      await supabase.from("order_items").insert(orderItems);
-
-      clearCart();
-      router.push(`/checkout/success?order=${orderData.order_number}`);
+      router.push(`/checkout/success?order=${result.order_number}`);
     } catch (err: any) {
       addToast({
         title: "Checkout Error",
@@ -645,11 +759,11 @@ export default function CheckoutPage() {
     );
   }
 
-  if (items.length === 0 && currentStep === 0 && !isProcessing) {
+  if (checkoutItems.length === 0 && currentStep === 0 && !isProcessing) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-6 bg-slate-50/50 rounded-3xl my-12 border border-dashed border-slate-300 mx-4 md:mx-16">
-        <h1 className="text-3xl font-bold mb-4 text-slate-900">Your cart is empty</h1>
-        <p className="text-slate-500 mb-8">Add items before checking out.</p>
+        <h1 className="text-3xl font-bold mb-4 text-slate-900">Your checkout is empty</h1>
+        <p className="text-slate-500 mb-8">Add items to your cart before checking out.</p>
         <Button variant="primary" onClick={() => router.push("/products")}>
           Continue Shopping
         </Button>
@@ -697,7 +811,7 @@ export default function CheckoutPage() {
 
           <div className="flex-1 relative">
             <AnimatePresence mode="wait">
-              {/* STEP 0: Premium Address & Location System */}
+              {/* STEP 0: Address Form */}
               {currentStep === 0 && (
                 <motion.div
                   key="step0"
@@ -706,9 +820,7 @@ export default function CheckoutPage() {
                   exit={{ opacity: 0, x: 15 }}
                   className="flex flex-col gap-6"
                 >
-                  {/* Master Address Card */}
                   <div className="bg-white border border-slate-200/90 shadow-xl rounded-3xl p-6 md:p-8 flex flex-col gap-6">
-                    {/* Header & Geolocation Button */}
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-5">
                       <div className="flex items-center gap-3">
                         <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl border border-blue-100">
@@ -739,7 +851,6 @@ export default function CheckoutPage() {
                       </button>
                     </div>
 
-                    {/* Error Banner when Location fails */}
                     {locationError && (
                       <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 text-xs text-amber-900 shadow-sm">
                         <MapPinOff className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -752,7 +863,6 @@ export default function CheckoutPage() {
                       </div>
                     )}
 
-                    {/* Geocoding Location Search Box */}
                     <div className="relative">
                       <label className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <Search className="w-3.5 h-3.5 text-blue-600" /> Search for your location...
@@ -771,7 +881,6 @@ export default function CheckoutPage() {
                         )}
                       </div>
 
-                      {/* Search Suggestions Dropdown */}
                       {showSuggestions && (searchResults.length > 0 || searchNotice) && (
                         <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-white border border-slate-200 rounded-2xl shadow-2xl max-h-72 overflow-y-auto divide-y divide-slate-100">
                           {searchResults.length > 0 ? (
@@ -792,39 +901,14 @@ export default function CheckoutPage() {
                                 <Info className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
                                 <div>
                                   <span>{searchNotice}</span>
-                                  <p className="text-blue-700 font-bold mt-1">
-                                    Location not found? No problem. Please enter your delivery address manually below.
-                                  </p>
                                 </div>
                               </div>
-                              {suggestedAreas.length > 0 && (
-                                <div className="pt-2 border-t border-slate-100">
-                                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                                    Suggested Delivery Areas:
-                                  </span>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {suggestedAreas.map((area, idx) => (
-                                      <button
-                                        key={idx}
-                                        type="button"
-                                        onClick={() => {
-                                          setLocationSearch(area.split(" ")[0]);
-                                        }}
-                                        className="px-2.5 py-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-lg text-xs font-medium border border-slate-200 transition-colors"
-                                      >
-                                        {area}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
                             </div>
                           ) : null}
                         </div>
                       )}
                     </div>
 
-                    {/* Interactive Leaflet Map */}
                     <div className="flex flex-col gap-2">
                       <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                         <Compass className="w-3.5 h-3.5 text-blue-600" /> Interactive Location Map
@@ -838,7 +922,6 @@ export default function CheckoutPage() {
                       />
                     </div>
 
-                    {/* Location Confirmation Badge Card */}
                     {form.latitude && form.longitude && (
                       <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs text-emerald-950 shadow-sm">
                         <div className="flex items-start gap-3">
@@ -850,203 +933,95 @@ export default function CheckoutPage() {
                             <span className="text-emerald-800 font-semibold block mt-0.5">
                               Lat: {form.latitude.toFixed(6)}, Lng: {form.longitude.toFixed(6)}
                             </span>
-                            {locationAccuracy && locationAccuracy > 500 && (
-                              <span className="text-[11px] font-bold text-amber-700 flex items-center gap-1 mt-1">
-                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                                Approximate location (±{(locationAccuracy / 1000).toFixed(1)} km). Desktop network location is not exact GPS. Please verify your address details below.
-                              </span>
-                            )}
                           </div>
                         </div>
-
-                        <a
-                          href={form.googleMapsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm transition-all hover:scale-105 active:scale-95 shrink-0"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" /> Open in Google Maps
-                        </a>
                       </div>
                     )}
 
-                    {/* Friendly Manual Fallback Reassurance Notice */}
-                    {(!form.latitude || !form.longitude || locationError) && (
-                      <div className="p-3.5 bg-blue-50/70 border border-blue-200/80 rounded-2xl flex items-center gap-2.5 text-xs text-blue-950 font-medium">
-                        <Info className="w-4.5 h-4.5 text-blue-600 flex-shrink-0" />
-                        <span>Location not found? No problem. Please enter your delivery address manually below.</span>
-                      </div>
-                    )}
-
-                    {/* Contact Info Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                          <span className="flex items-center gap-1">
-                            <User className="w-3.5 h-3.5 text-slate-400" /> Full Name *
-                          </span>
-                          {errors.fullName && (
-                            <span className="text-red-500 font-semibold text-[11px] normal-case">
-                              {errors.fullName}
-                            </span>
-                          )}
+                          <span>Full Name *</span>
+                          {errors.fullName && <span className="text-red-500 text-[11px]">{errors.fullName}</span>}
                         </label>
                         <input
                           id="fullName-input"
                           type="text"
                           placeholder="e.g. Ramtanu Mal"
                           value={form.fullName}
-                          onChange={(e) => {
-                            setForm({ ...form, fullName: e.target.value });
-                            if (errors.fullName) setErrors({ ...errors, fullName: "" });
-                          }}
-                          className={`w-full h-12 px-4 bg-white border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all text-slate-900 ${
-                            errors.fullName
-                              ? "border-red-500 ring-2 ring-red-500/20"
-                              : "border-slate-300 focus:ring-blue-500/20 focus:border-blue-600"
-                          }`}
+                          onChange={(e) => setForm({ ...form, fullName: e.target.value })}
+                          className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 text-slate-900"
                         />
                       </div>
 
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                          <span className="flex items-center gap-1">
-                            <PhoneCall className="w-3.5 h-3.5 text-slate-400" /> Mobile Number *
-                          </span>
-                          {errors.phone && (
-                            <span className="text-red-500 font-semibold text-[11px] normal-case">
-                              {errors.phone}
-                            </span>
-                          )}
+                          <span>Mobile Number *</span>
+                          {errors.phone && <span className="text-red-500 text-[11px]">{errors.phone}</span>}
                         </label>
                         <input
                           id="phone-input"
                           type="tel"
                           placeholder="e.g. +91 9876543210"
                           value={form.phone}
-                          onChange={(e) => {
-                            setForm({ ...form, phone: e.target.value });
-                            if (errors.phone) setErrors({ ...errors, phone: "" });
-                          }}
-                          className={`w-full h-12 px-4 bg-white border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all text-slate-900 ${
-                            errors.phone
-                              ? "border-red-500 ring-2 ring-red-500/20"
-                              : "border-slate-300 focus:ring-blue-500/20 focus:border-blue-600"
-                          }`}
+                          onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                          className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 text-slate-900"
                         />
                       </div>
                     </div>
 
-                    {/* Email */}
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
-                        <Mail className="w-3.5 h-3.5 text-slate-400" /> Email Address (Optional)
+                      <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        House / Flat No. & Building
                       </label>
                       <input
-                        id="email-input"
-                        type="email"
-                        placeholder="e.g. user@example.com"
-                        value={form.email}
-                        onChange={(e) => setForm({ ...form, email: e.target.value })}
-                        className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all text-slate-900"
-                      />
-                    </div>
-
-                    {/* Address Lines */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
-                        <Home className="w-3.5 h-3.5 text-slate-400" /> House / Flat No. & Building
-                      </label>
-                      <input
-                        id="addressLine1-input"
                         type="text"
                         placeholder="e.g. House No. 42, Green Park Apartments"
                         value={form.addressLine1}
                         onChange={(e) => setForm({ ...form, addressLine1: e.target.value })}
-                        className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all text-slate-900"
+                        className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 text-slate-900"
                       />
                     </div>
 
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
                         <span>Street / Area *</span>
-                        {errors.addressLine2 && (
-                          <span className="text-red-500 font-semibold text-[11px] normal-case">
-                            {errors.addressLine2}
-                          </span>
-                        )}
+                        {errors.addressLine2 && <span className="text-red-500 text-[11px]">{errors.addressLine2}</span>}
                       </label>
                       <input
                         id="addressLine2-input"
                         type="text"
                         placeholder="e.g. Station Road, Sector 2"
                         value={form.addressLine2}
-                        onChange={(e) => {
-                          setForm({ ...form, addressLine2: e.target.value });
-                          if (errors.addressLine2) setErrors({ ...errors, addressLine2: "" });
-                        }}
-                        className={`w-full h-12 px-4 bg-white border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all text-slate-900 ${
-                          errors.addressLine2
-                            ? "border-red-500 ring-2 ring-red-500/20"
-                            : "border-slate-300 focus:ring-blue-500/20 focus:border-blue-600"
-                        }`}
+                        onChange={(e) => setForm({ ...form, addressLine2: e.target.value })}
+                        className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 text-slate-900"
                       />
                     </div>
 
-                    {/* Landmark & City (Names ONLY) */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
                           <span>Landmark *</span>
-                          {errors.landmark && (
-                            <span className="text-red-500 font-semibold text-[11px] normal-case">
-                              {errors.landmark}
-                            </span>
-                          )}
+                          {errors.landmark && <span className="text-red-500 text-[11px]">{errors.landmark}</span>}
                         </label>
                         <input
                           id="landmark-input"
                           type="text"
-                          placeholder="e.g. Near Main Road / Near School / Near Temple"
+                          placeholder="e.g. Near Main Road / Station"
                           value={form.landmark}
-                          onChange={(e) => {
-                            setForm({ ...form, landmark: e.target.value });
-                            if (errors.landmark) setErrors({ ...errors, landmark: "" });
-                          }}
-                          className={`w-full h-12 px-4 bg-white border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all text-slate-900 ${
-                            errors.landmark
-                              ? "border-red-500 ring-2 ring-red-500/20"
-                              : "border-slate-300 focus:ring-blue-500/20 focus:border-blue-600"
-                          }`}
+                          onChange={(e) => setForm({ ...form, landmark: e.target.value })}
+                          className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 text-slate-900"
                         />
-                        <p className="text-[11px] text-slate-500 font-medium">
-                          No specific landmark? Enter a nearby recognizable place (or "N/A" if none).
-                        </p>
                       </div>
 
                       <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                          <span className="flex items-center gap-1">
-                            <Building2 className="w-3.5 h-3.5 text-slate-400" /> City / Area *
-                          </span>
-                          {errors.city && (
-                            <span className="text-red-500 font-semibold text-[11px] normal-case">
-                              {errors.city}
-                            </span>
-                          )}
+                        <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                          City / Area *
                         </label>
                         <select
-                          id="city-input"
                           value={form.city}
-                          onChange={(e) => {
-                            setForm({ ...form, city: e.target.value });
-                            if (errors.city) setErrors({ ...errors, city: "" });
-                          }}
-                          className={`w-full h-12 px-4 bg-white border rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 cursor-pointer transition-all ${
-                            errors.city
-                              ? "border-red-500 ring-2 ring-red-500/20"
-                              : "border-slate-300 focus:ring-blue-500/20 focus:border-blue-600"
-                          }`}
+                          onChange={(e) => setForm({ ...form, city: e.target.value })}
+                          className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 cursor-pointer"
                         >
                           {cityRules.map((c) => (
                             <option key={c.name} value={c.name}>
@@ -1057,31 +1032,19 @@ export default function CheckoutPage() {
                       </div>
                     </div>
 
-                    {/* PIN Code & Address Tags */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
                           <span>Postal / PIN Code *</span>
-                          {errors.postalCode && (
-                            <span className="text-red-500 font-semibold text-[11px] normal-case">
-                              {errors.postalCode}
-                            </span>
-                          )}
+                          {errors.postalCode && <span className="text-red-500 text-[11px]">{errors.postalCode}</span>}
                         </label>
                         <input
                           id="postalCode-input"
                           type="text"
                           placeholder="e.g. 712410"
                           value={form.postalCode}
-                          onChange={(e) => {
-                            setForm({ ...form, postalCode: e.target.value });
-                            if (errors.postalCode) setErrors({ ...errors, postalCode: "" });
-                          }}
-                          className={`w-full h-12 px-4 bg-white border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all text-slate-900 ${
-                            errors.postalCode
-                              ? "border-red-500 ring-2 ring-red-500/20"
-                              : "border-slate-300 focus:ring-blue-500/20 focus:border-blue-600"
-                          }`}
+                          onChange={(e) => setForm({ ...form, postalCode: e.target.value })}
+                          className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 text-slate-900"
                         />
                       </div>
 
@@ -1101,28 +1064,11 @@ export default function CheckoutPage() {
                                   : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
                               }`}
                             >
-                              {tag === "Home" && <Home className="w-3.5 h-3.5" />}
-                              {tag === "Work" && <Briefcase className="w-3.5 h-3.5" />}
-                              {tag === "Other" && <MapPin className="w-3.5 h-3.5" />}
                               {tag}
                             </button>
                           ))}
                         </div>
                       </div>
-                    </div>
-
-                    {/* Google Maps URL (Auto / Editable) */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                        Google Maps Location Reference URL
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="https://www.google.com/maps?q=..."
-                        value={form.googleMapsUrl}
-                        onChange={(e) => setForm({ ...form, googleMapsUrl: e.target.value })}
-                        className="w-full h-12 px-4 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all text-slate-900"
-                      />
                     </div>
                   </div>
 
@@ -1134,7 +1080,7 @@ export default function CheckoutPage() {
                 </motion.div>
               )}
 
-              {/* STEP 1: Payment Method Selection */}
+              {/* STEP 1: Payment Method */}
               {currentStep === 1 && (
                 <motion.div
                   key="step1"
@@ -1178,7 +1124,7 @@ export default function CheckoutPage() {
                               <Banknote className="w-5 h-5 text-emerald-600" /> Cash on Delivery (COD)
                             </span>
                             <p className="text-xs text-slate-500 mt-1">
-                              Pay with cash upon package delivery. Payment status remains <strong>COD Pending</strong> until collected.
+                              Pay with cash upon package delivery.
                             </p>
                           </div>
                         </div>
@@ -1205,7 +1151,7 @@ export default function CheckoutPage() {
                               <CreditCard className="w-5 h-5 text-blue-600" /> Online Payment (UPI / Card / NetBanking)
                             </span>
                             <p className="text-xs text-slate-500 mt-1">
-                              Pay securely via online gateway. Order initiates as <strong>Pending</strong> and updates to <strong>Paid</strong> only upon verified gateway confirmation.
+                              Pay securely via online gateway.
                             </p>
                           </div>
                         </div>
@@ -1224,7 +1170,7 @@ export default function CheckoutPage() {
                 </motion.div>
               )}
 
-              {/* STEP 2: Review Order & Submit */}
+              {/* STEP 2: Review Order */}
               {currentStep === 2 && (
                 <motion.div
                   key="step2"
@@ -1248,11 +1194,6 @@ export default function CheckoutPage() {
                         <span className="text-slate-600 block mt-0.5">
                           {[form.addressLine1, form.addressLine2, form.landmark].filter(Boolean).join(", ")}, {form.city} ({form.postalCode})
                         </span>
-                        {form.latitude && form.longitude && (
-                          <span className="text-emerald-700 font-semibold block mt-1">
-                            📍 Coordinates: {form.latitude.toFixed(5)}, {form.longitude.toFixed(5)}
-                          </span>
-                        )}
                       </div>
                       <button onClick={() => setCurrentStep(0)} className="text-blue-600 font-bold underline">
                         Change
@@ -1266,11 +1207,6 @@ export default function CheckoutPage() {
                         </span>
                         <span className="font-bold text-slate-900 text-base">
                           {form.paymentMethod === "COD" ? "Cash on Delivery (COD)" : "Online Payment"}
-                        </span>
-                        <span className="text-slate-500 block mt-0.5">
-                          {form.paymentMethod === "COD"
-                            ? "Initial Status: COD Pending"
-                            : "Initial Status: Pending gateway verification"}
                         </span>
                       </div>
                       <button onClick={() => setCurrentStep(1)} className="text-blue-600 font-bold underline">
@@ -1300,41 +1236,231 @@ export default function CheckoutPage() {
           </div>
         </div>
 
-        {/* Right Column: Order Summary (Delivery Charge Shown ONLY Here) */}
+        {/* Right Column: Order Summary & Price Details (Requirements 1, 3, 4 & 5) */}
         <div className="w-full lg:w-1/3 flex flex-col pt-4">
-          <div className="bg-white p-8 rounded-3xl sticky top-24 border border-slate-200 shadow-xl">
-            <h2 className="text-xl font-extrabold mb-6 text-slate-900">Order Summary</h2>
-
-            <div className="flex flex-col gap-4 mb-6 border-b border-slate-100 pb-6 max-h-[300px] overflow-y-auto pr-2">
-              {items.map((item) => (
-                <div key={item.id} className="flex gap-4">
-                  <div className="relative w-16 h-20 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0 border border-slate-200">
-                    <Image src={item.image} alt={item.title} fill className="object-cover" />
-                    <div className="absolute -top-2 -right-2 w-5 h-5 bg-slate-900 text-white text-[10px] rounded-full flex items-center justify-center font-bold z-10">
-                      {item.quantity}
-                    </div>
-                  </div>
-                  <div className="flex flex-col flex-1 justify-center">
-                    <span className="font-bold text-sm text-slate-900 line-clamp-1">{item.title}</span>
-                    {item.variantInfo && (
-                      <span className="text-xs text-slate-500 mt-0.5">{item.variantInfo}</span>
-                    )}
-                    <span className="text-xs font-semibold text-slate-700 mt-1">
-                      Qty: {item.quantity} × {formatCurrency(item.price)}
-                    </span>
-                  </div>
+          <div className="bg-white p-6 sm:p-8 rounded-3xl sticky top-24 border border-slate-200 shadow-xl flex flex-col gap-6">
+            {/* BUY NOW MODE BANNER */}
+            {isBuyNow && (
+              <div className="bg-amber-50 border border-amber-200/90 p-3.5 rounded-2xl flex items-start gap-2.5 text-xs font-bold text-amber-950 shadow-sm">
+                <Zap className="w-4.5 h-4.5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="block text-amber-900 font-extrabold uppercase tracking-wide text-[11px]">
+                    ⚡ Buy Now Checkout Mode
+                  </span>
+                  <span className="text-amber-800 font-medium block mt-0.5 leading-snug">
+                    Checking out 1 selected item. (Your main cart items remain safely saved.)
+                  </span>
                 </div>
-              ))}
+              </div>
+            )}
+
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-blue-600" /> Order Summary
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">{checkoutItems.length} item(s) in your order</p>
             </div>
 
-            {/* Delivery Fee & Taxes Shown Exclusively Here */}
-            <div className="flex flex-col gap-3 text-sm border-b border-slate-100 pb-6 mb-6">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Subtotal</span>
-                <span className="font-semibold text-slate-900">{formatCurrency(subtotal)}</span>
+            {/* Cart Items List */}
+            <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 max-h-[280px] overflow-y-auto pr-1 divide-y divide-slate-100">
+              {checkoutItems.map((item) => {
+                const itemMrp = item.mrp || item.price;
+                const itemSavings = Math.max(0, itemMrp - item.price) * item.quantity;
+                return (
+                  <div key={item.id} className="flex gap-3.5 items-center pt-3 first:pt-0">
+                    <div className="relative w-14 h-16 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0 border border-slate-200">
+                      <Image src={item.image} alt={item.title} fill className="object-cover" />
+                      <div className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-slate-900 text-white text-[10px] rounded-full flex items-center justify-center font-bold z-10">
+                        {item.quantity}
+                      </div>
+                    </div>
+                    <div className="flex flex-col flex-1 justify-center">
+                      <span className="font-bold text-xs text-slate-900 line-clamp-1">{item.title}</span>
+                      {item.variantInfo && (
+                        <span className="text-[11px] text-slate-500">{item.variantInfo}</span>
+                      )}
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs font-bold text-slate-900">
+                          {formatCurrency(item.price)}
+                        </span>
+                        {itemMrp > item.price && (
+                          <span className="text-[11px] text-slate-400 line-through">
+                            {formatCurrency(itemMrp)}
+                          </span>
+                        )}
+                        {itemSavings > 0 && (
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">
+                            Save {formatCurrency(itemSavings)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="font-bold text-xs text-slate-900">
+                      {formatCurrency(item.price * item.quantity)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* APPLY COUPON SECTION (Requirement 2 & 3) */}
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 flex flex-col gap-3">
+              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <TicketPercent className="w-4 h-4 text-blue-600" /> Apply Coupon
+              </span>
+
+              {appliedCoupon ? (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <span className="font-mono font-bold text-emerald-900 text-sm block">
+                        {appliedCoupon.code}
+                      </span>
+                      <span className="text-emerald-700 font-semibold text-[11px]">
+                        Saved {formatCurrency(couponDiscountAmount)}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveCoupon}
+                    className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-800 transition-colors"
+                    title="Remove Coupon"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleApplyCoupon} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Enter Coupon Code (e.g. WELCOME10)"
+                    value={couponInput}
+                    onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                    className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold uppercase focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-900"
+                  />
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={isValidatingCoupon || !couponInput.trim()}
+                    className="px-4 py-2 text-xs font-bold shrink-0"
+                  >
+                    {isValidatingCoupon ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Apply"}
+                  </Button>
+                </form>
+              )}
+
+              {/* AVAILABLE COUPONS LIST */}
+              {availableCoupons.length > 0 && !appliedCoupon && (
+                <div className="mt-2 flex flex-col gap-2 pt-2 border-t border-slate-200/60">
+                  <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
+                    Available Coupons
+                  </span>
+                  {availableCoupons.map((c) => (
+                    <div
+                      key={c.id}
+                      className="p-3 bg-white border border-blue-200 rounded-xl flex items-center justify-between shadow-sm hover:border-blue-400 transition-all"
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <Tag className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-slate-900 text-xs">{c.code}</span>
+                            <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+                              {c.displayBadge}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-500 block mt-0.5 font-medium">
+                            {c.min_order_amount > 0 ? `Min order ${formatCurrency(c.min_order_amount)}` : "Save on your order"}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyCoupon(c.code)}
+                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white rounded-lg text-xs font-bold transition-all shrink-0 border border-blue-200"
+                      >
+                        APPLY
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* OTHER MARKETPLACE COUPONS WITH REASONS */}
+              {otherCoupons.length > 0 && !appliedCoupon && (
+                <div className="mt-1 flex flex-col gap-2 pt-2 border-t border-slate-200/60">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Other Marketplace Coupons
+                  </span>
+                  {otherCoupons.map((c) => (
+                    <div
+                      key={c.id}
+                      className="p-2.5 bg-slate-100/70 border border-slate-200 rounded-xl flex items-center justify-between opacity-80"
+                    >
+                      <div className="flex items-start gap-2">
+                        <Tag className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-slate-700 text-xs">{c.code}</span>
+                            <span className="text-[10px] font-semibold bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+                              {c.displayBadge}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-amber-700 font-medium block mt-0.5">
+                            {c.reason || "Not applicable to this order"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {couponMessage && (
+                <p
+                  className={`text-[11px] font-semibold ${
+                    couponMessage.type === "success" ? "text-emerald-700" : "text-red-600"
+                  }`}
+                >
+                  {couponMessage.text}
+                </p>
+              )}
+            </div>
+
+            {/* PRICE DETAILS BREAKDOWN (Requirement 4 & 5) */}
+            <div className="flex flex-col gap-2.5 text-xs border-b border-slate-100 pb-5">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
+                PRICE DETAILS
+              </h3>
+
+              <div className="flex justify-between text-slate-600">
+                <span>MRP / Original Price</span>
+                <span className="font-semibold text-slate-800">{formatCurrency(itemsMRP)}</span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500">Delivery Fee ({form.city})</span>
+
+              {productDiscountTotal > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>Product Listing Discount</span>
+                  <span>-{formatCurrency(productDiscountTotal)}</span>
+                </div>
+              )}
+
+              {appliedCoupon && couponDiscountAmount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>Coupon Discount ({appliedCoupon.code})</span>
+                  <span>-{formatCurrency(couponDiscountAmount)}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between text-slate-700 font-medium pt-1.5 border-t border-dashed border-slate-200">
+                <span>Subtotal / Selling Price</span>
+                <span className="font-bold text-slate-900">{formatCurrency(subtotalAfterCoupon)}</span>
+              </div>
+
+              <div className="flex justify-between items-center text-slate-600">
+                <span>Delivery Fee ({form.city})</span>
                 <span className="font-semibold text-slate-900">
                   {calculatedDeliveryFee === 0 ? (
                     <span className="text-emerald-600 font-bold">FREE</span>
@@ -1343,17 +1469,33 @@ export default function CheckoutPage() {
                   )}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Calculated Tax</span>
+
+              <div className="flex justify-between text-slate-600">
+                <span>Calculated Tax</span>
                 <span className="font-semibold text-slate-900">{formatCurrency(calculatedTax)}</span>
               </div>
             </div>
 
-            <div className="flex justify-between items-end">
-              <span className="text-lg font-extrabold text-slate-900">Grand Total</span>
-              <div className="flex flex-col items-end gap-1">
-                <span className="text-xs text-slate-500">INR</span>
-                <span className="text-3xl font-black text-slate-900">{formatCurrency(grandTotal)}</span>
+            {/* PROMINENT SAVINGS BANNER */}
+            {totalSavings > 0 && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex items-center gap-2.5 text-emerald-900 text-xs font-bold shadow-sm">
+                <Sparkles className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
+                <span>🎉 You save {formatCurrency(totalSavings)} on this order!</span>
+              </div>
+            )}
+
+            <div className="flex justify-between items-end pt-1">
+              <div>
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                  Total Payable
+                </span>
+                <span className="text-xl font-extrabold text-slate-900">Grand Total</span>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className="text-[10px] text-slate-400 font-bold">INR</span>
+                <span className="text-2xl sm:text-3xl font-black text-slate-900">
+                  {formatCurrency(grandTotal)}
+                </span>
               </div>
             </div>
           </div>

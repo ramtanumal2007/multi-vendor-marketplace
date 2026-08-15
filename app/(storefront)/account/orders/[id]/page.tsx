@@ -158,7 +158,12 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
             <ArrowLeft className="w-4 h-4 text-foreground" />
           </Link>
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold">Order #{order.order_number}</h1>
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl md:text-3xl font-bold">Order #{order.order_number}</h1>
+              <span className="text-sm text-foreground-secondary font-mono font-bold bg-background-secondary px-2.5 py-1 rounded-lg border border-border">
+                Invoice #{order.invoice_number || (order.order_number ? `INV-${order.order_number.replace("ORD-", "")}` : "INV-10007")}
+              </span>
+            </div>
             <p className="text-foreground-secondary mt-1 font-medium text-sm">
               Placed on {formatExactDateTime(order.created_at)} ({formatRelativeTime(order.created_at)})
             </p>
@@ -296,16 +301,15 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
                         <Package className="w-6 h-6 text-foreground-secondary" />
                       </div>
                       <div>
+                        <div className="flex items-center gap-1.5 font-mono text-xs text-blue-600 font-bold mb-0.5">
+                          <span>{item.order_item_code || `OI-${(order.order_number || "10000").replace("ORD-", "")}-${String(items.indexOf(item) + 1).padStart(3, "0")}`}</span>
+                          <span className="text-foreground-secondary/40">|</span>
+                          <span className="text-foreground-secondary font-normal">SKU: {item.sku || "N/A"}</span>
+                        </div>
                         <p className="font-semibold text-base">{item.title}</p>
                         <p className="text-sm text-foreground-secondary mt-0.5">
                           Quantity: {item.quantity} × {formatCurrency(Number(item.unit_price))}
                         </p>
-                        {storeObj?.name && (
-                          <div className="text-xs text-foreground-secondary mt-1 flex items-center gap-1">
-                            <Store className="w-3.5 h-3.5" />
-                            Seller: <span className="font-semibold text-foreground">{storeObj.name}</span>
-                          </div>
-                        )}
                       </div>
                     </div>
                     <div className="font-bold text-base">{formatCurrency(Number(item.line_total))}</div>

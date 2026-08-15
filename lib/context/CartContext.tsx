@@ -9,6 +9,7 @@ export interface CartItem {
   productId: string;
   title: string;
   price: number;
+  mrp?: number;
   image: string;
   quantity: number;
   variantInfo?: string;
@@ -16,12 +17,15 @@ export interface CartItem {
 
 interface CartContextType {
   items: CartItem[];
+  buyNowItem: CartItem | null;
   isDrawerOpen: boolean;
   itemCount: number;
   subtotal: number;
   openDrawer: () => void;
   closeDrawer: () => void;
   addItem: (item: Omit<CartItem, "quantity">, quantityToAdd?: number) => void;
+  setBuyNowItem: (item: CartItem | null) => void;
+  clearBuyNowItem: () => void;
   removeItem: (id: string) => void;
   updateQuantity: (id: string, quantity: number) => void;
   clearCart: () => void;
@@ -31,6 +35,7 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
+  const [buyNowItem, setBuyNowItemState] = useState<CartItem | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   
@@ -42,9 +47,30 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem("cart");
     if (saved) {
       try {
-        setItems(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const sanitized = parsed.map((item: any) => ({
+            ...item,
+            mrp: item.mrp !== undefined && item.mrp !== null ? Number(item.mrp) : Number(item.price),
+          }));
+          setItems(sanitized);
+        }
       } catch (e) {}
     }
+
+    const savedBuyNow = sessionStorage.getItem("buy_now_item");
+    if (savedBuyNow) {
+      try {
+        const parsed = JSON.parse(savedBuyNow);
+        if (parsed && parsed.id) {
+          setBuyNowItemState({
+            ...parsed,
+            mrp: parsed.mrp !== undefined && parsed.mrp !== null ? Number(parsed.mrp) : Number(parsed.price),
+          });
+        }
+      } catch (e) {}
+    }
+
     setIsLoaded(true);
   }, []);
 
@@ -57,20 +83,38 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const openDrawer = () => setIsDrawerOpen(true);
   const closeDrawer = () => setIsDrawerOpen(false);
 
+  const setBuyNowItem = (item: CartItem | null) => {
+    setBuyNowItemState(item);
+    if (item) {
+      sessionStorage.setItem("buy_now_item", JSON.stringify(item));
+    } else {
+      sessionStorage.removeItem("buy_now_item");
+    }
+  };
+
+  const clearBuyNowItem = () => {
+    setBuyNowItem(null);
+  };
+
   const addItem = (newItem: Omit<CartItem, "quantity">, quantityToAdd = 1) => {
     if (!authLoading && !user) {
       router.push(`/login?redirect=${encodeURIComponent(pathname)}`);
       return;
     }
 
+    const itemWithMrp = {
+      ...newItem,
+      mrp: newItem.mrp !== undefined && newItem.mrp !== null ? Number(newItem.mrp) : Number(newItem.price),
+    };
+
     setItems((prev) => {
-      const existing = prev.find((item) => item.id === newItem.id);
+      const existing = prev.find((item) => item.id === itemWithMrp.id);
       if (existing) {
         return prev.map((item) =>
-          item.id === newItem.id ? { ...item, quantity: item.quantity + quantityToAdd } : item
+          item.id === itemWithMrp.id ? { ...item, quantity: item.quantity + quantityToAdd } : item
         );
       }
-      return [...prev, { ...newItem, quantity: quantityToAdd }];
+      return [...prev, { ...itemWithMrp, quantity: quantityToAdd }];
     });
     openDrawer();
   };
@@ -99,12 +143,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     <CartContext.Provider
       value={{
         items,
+        buyNowItem,
         isDrawerOpen,
         itemCount,
         subtotal,
         openDrawer,
         closeDrawer,
         addItem,
+        setBuyNowItem,
+        clearBuyNowItem,
         removeItem,
         updateQuantity,
         clearCart,

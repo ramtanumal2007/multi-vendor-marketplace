@@ -9,9 +9,10 @@ interface CreateCouponModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  editingCoupon?: any | null;
 }
 
-export function CreateCouponModal({ isOpen, onClose, onSuccess }: CreateCouponModalProps) {
+export function CreateCouponModal({ isOpen, onClose, onSuccess, editingCoupon }: CreateCouponModalProps) {
   const [code, setCode] = useState("");
   const [type, setType] = useState<"percentage" | "fixed">("percentage");
   const [value, setValue] = useState("");
@@ -28,7 +29,7 @@ export function CreateCouponModal({ isOpen, onClose, onSuccess }: CreateCouponMo
   const [perCustomerLimit, setPerCustomerLimit] = useState("1");
   const [validFrom, setValidFrom] = useState("");
   const [validTo, setValidTo] = useState("");
-  const [isActive] = useState(true);
+  const [isActive, setIsActive] = useState(true);
 
   const [sellersList, setSellersList] = useState<Array<{ id: string; business_name?: string; seller_id_code?: string }>>([]);
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string }>>([]);
@@ -40,6 +41,51 @@ export function CreateCouponModal({ isOpen, onClose, onSuccess }: CreateCouponMo
 
   useEffect(() => {
     if (!isOpen) return;
+
+    if (editingCoupon) {
+      setCode(editingCoupon.code || "");
+      setType(editingCoupon.type || "percentage");
+      setValue(editingCoupon.value !== undefined ? String(editingCoupon.value) : "");
+      setMinOrderAmount(editingCoupon.min_order_amount !== undefined ? String(editingCoupon.min_order_amount) : "0");
+      setTargetType(editingCoupon.target_type || "all");
+      setSelectedPlans(editingCoupon.target_membership_plans || ["BASIC", "PRO", "BUSINESS"]);
+      setSelectedSellers(editingCoupon.target_sellers || []);
+      setSelectedCategories(editingCoupon.applicable_categories || []);
+      setSelectedProducts(editingCoupon.applicable_products || []);
+      setIsFirstOrderOnly(editingCoupon.is_first_order_only || false);
+      setAutoApply(editingCoupon.auto_apply || false);
+      setStackable(editingCoupon.stackable || false);
+      setMaxTotalRedemptions(
+        editingCoupon.max_total_redemptions !== null && editingCoupon.max_total_redemptions !== undefined
+          ? String(editingCoupon.max_total_redemptions)
+          : editingCoupon.usage_limit !== null && editingCoupon.usage_limit !== undefined
+          ? String(editingCoupon.usage_limit)
+          : ""
+      );
+      setPerCustomerLimit(editingCoupon.per_customer_limit !== undefined ? String(editingCoupon.per_customer_limit) : "1");
+      setValidFrom(editingCoupon.valid_from ? new Date(editingCoupon.valid_from).toISOString().substring(0, 10) : "");
+      setValidTo(editingCoupon.valid_to ? new Date(editingCoupon.valid_to).toISOString().substring(0, 10) : "");
+      setIsActive(editingCoupon.is_active !== undefined ? editingCoupon.is_active : true);
+    } else {
+      setCode("");
+      setType("percentage");
+      setValue("");
+      setMinOrderAmount("0");
+      setTargetType("all");
+      setSelectedPlans(["BASIC", "PRO", "BUSINESS"]);
+      setSelectedSellers([]);
+      setSelectedCategories([]);
+      setSelectedProducts([]);
+      setIsFirstOrderOnly(false);
+      setAutoApply(false);
+      setStackable(false);
+      setMaxTotalRedemptions("");
+      setPerCustomerLimit("1");
+      setValidFrom("");
+      setValidTo("");
+      setIsActive(true);
+    }
+
     async function loadDropdowns() {
       const { data: sellers } = await supabase.from("seller_profiles").select("id, business_name, seller_id_code").eq("verification_status", "approved");
       const { data: categories } = await supabase.from("categories").select("id, name");
@@ -50,7 +96,7 @@ export function CreateCouponModal({ isOpen, onClose, onSuccess }: CreateCouponMo
       if (products) setProductsList(products);
     }
     loadDropdowns();
-  }, [isOpen]);
+  }, [isOpen, editingCoupon]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,8 +113,25 @@ export function CreateCouponModal({ isOpen, onClose, onSuccess }: CreateCouponMo
 
     setIsSubmitting(true);
     try {
+      const formattedCode = code.trim().toUpperCase();
+
+      // Check case-insensitive duplication
+      const { data: existing } = await supabase
+        .from("coupons")
+        .select("id")
+        .eq("code", formattedCode);
+
+      if (existing && existing.length > 0) {
+        const isSelf = editingCoupon && existing.some((c: any) => c.id === editingCoupon.id);
+        if (!isSelf) {
+          setErrorMsg(`Coupon code "${formattedCode}" already exists.`);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       const payload: Record<string, unknown> = {
-        code: code.trim().toUpperCase(),
+        code: formattedCode,
         type,
         value: parseFloat(value),
         min_order_amount: parseFloat(minOrderAmount || "0"),
@@ -88,13 +151,18 @@ export function CreateCouponModal({ isOpen, onClose, onSuccess }: CreateCouponMo
         is_active: isActive,
       };
 
-      const { error } = await supabase.from("coupons").insert(payload);
-      if (error) throw error;
+      if (editingCoupon) {
+        const { error } = await supabase.from("coupons").update(payload).eq("id", editingCoupon.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("coupons").insert(payload);
+        if (error) throw error;
+      }
 
       onSuccess();
       onClose();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to create coupon.";
+      const message = err instanceof Error ? err.message : "Failed to save coupon.";
       setErrorMsg(message);
     } finally {
       setIsSubmitting(false);
@@ -106,7 +174,7 @@ export function CreateCouponModal({ isOpen, onClose, onSuccess }: CreateCouponMo
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Create Admin Coupon">
+    <Modal isOpen={isOpen} onClose={onClose} title={editingCoupon ? `Edit Coupon "${editingCoupon.code}"` : "Create Admin Coupon"}>
       <form onSubmit={handleSubmit} className="space-y-4 text-slate-800 text-sm max-h-[75vh] overflow-y-auto pr-1">
         {errorMsg && (
           <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-xs">
@@ -356,7 +424,15 @@ export function CreateCouponModal({ isOpen, onClose, onSuccess }: CreateCouponMo
             disabled={isSubmitting}
             className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2 rounded-lg flex items-center gap-2 transition-all shadow-sm"
           >
-            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Create Coupon
+            {isSubmitting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : editingCoupon ? (
+              "Save Changes"
+            ) : (
+              <>
+                <Plus className="w-4 h-4" /> Create Coupon
+              </>
+            )}
           </button>
         </div>
       </form>

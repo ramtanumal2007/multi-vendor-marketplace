@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Trash2, Tag, Layers, User, Package, RefreshCw } from "lucide-react";
+import { Search, Plus, Trash2, Tag, Layers, User, Package, RefreshCw, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/utils";
@@ -12,6 +12,7 @@ export default function AdminCouponsPage() {
   const [coupons, setCoupons] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingCoupon, setEditingCoupon] = useState<any | null>(null);
   const supabase = createClient();
 
   const fetchCoupons = async () => {
@@ -76,9 +77,16 @@ export default function AdminCouponsPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Admin Coupon Management</h1>
-          <p className="text-sm text-slate-500 mt-1">Create discount codes targeting marketplace tiers, categories, sellers, and products.</p>
+          <p className="text-sm text-slate-500 mt-1">Create and edit discount codes targeting marketplace tiers, categories, sellers, and products.</p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} variant="primary" className="flex items-center gap-2">
+        <Button
+          onClick={() => {
+            setEditingCoupon(null);
+            setIsModalOpen(true);
+          }}
+          variant="primary"
+          className="flex items-center gap-2"
+        >
           <Plus className="w-4 h-4" /> Create Coupon
         </Button>
       </div>
@@ -160,13 +168,25 @@ export default function AdminCouponsPage() {
                     </button>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => handleDelete(coupon.id)}
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                      title="Delete Coupon"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => {
+                          setEditingCoupon(coupon);
+                          setIsModalOpen(true);
+                        }}
+                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                        title="Edit Coupon"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(coupon.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Delete Coupon"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -187,8 +207,15 @@ export default function AdminCouponsPage() {
 
       <CreateCouponModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSuccess={fetchCoupons}
+        editingCoupon={editingCoupon}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingCoupon(null);
+        }}
+        onSuccess={() => {
+          fetchCoupons();
+          setEditingCoupon(null);
+        }}
       />
     </div>
   );

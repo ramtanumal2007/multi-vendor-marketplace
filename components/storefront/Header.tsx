@@ -89,14 +89,9 @@ export function Header() {
   return (
     <>
       <header
-        className={cn(
-          "fixed top-0 left-0 right-0 z-40 transition-all duration-300",
-          isScrolled
-            ? "h-[60px] bg-background/90 backdrop-blur-md border-b border-border shadow-[0_4px_30px_rgba(0,0,0,0.5)]"
-            : "h-[80px] bg-gradient-to-b from-black/80 to-transparent"
-        )}
+        className="fixed top-0 left-0 right-0 z-40 h-[60px] bg-background/95 backdrop-blur-md border-b border-border shadow-xs transition-all duration-300"
       >
-        <div className="mx-auto max-w-[1440px] px-6 md:px-16 h-full flex items-center justify-between">
+        <div className="mx-auto max-w-[1440px] px-4 md:px-12 h-full flex items-center justify-between">
           {/* Mobile Menu Toggle */}
           <button
             className="md:hidden p-2 -ml-2 text-foreground focus:outline-none"
@@ -107,23 +102,23 @@ export function Header() {
           </button>
 
           {/* Logo */}
-          <Link href="/" className="font-serif text-2xl font-bold tracking-tight text-foreground">
+          <Link href="/" className="font-serif text-xl md:text-2xl font-bold tracking-tight text-foreground">
             MY STORE
           </Link>
 
           {/* Desktop Location (UI Only) */}
-          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-background-secondary rounded-lg cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors ml-4 mr-auto">
-            <MapPin className="w-4 h-4 text-accent" />
+          <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-background-secondary rounded-lg cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors ml-4 mr-auto">
+            <MapPin className="w-3.5 h-3.5 text-accent" />
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-foreground-secondary uppercase tracking-wider leading-none">Deliver to</span>
-              <span className="text-xs font-medium text-foreground leading-none mt-1 flex items-center gap-1">
+              <span className="text-[9px] font-bold text-foreground-secondary uppercase tracking-wider leading-none">Deliver to</span>
+              <span className="text-xs font-medium text-foreground leading-none mt-0.5 flex items-center gap-1">
                 New Delhi, 110001 <ChevronDown className="w-3 h-3" />
               </span>
             </div>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2 md:gap-3">
+          <div className="flex items-center gap-1.5 md:gap-3">
             <button 
               onClick={() => setIsSearchOpen(true)}
               className="p-2 hover:bg-background-secondary rounded-full transition-colors hidden md:block"
@@ -275,33 +270,6 @@ export function Header() {
                 )}
               </AnimatePresence>
             </button>
-          </div>
-        </div>
-
-        {/* Categories Strip (Desktop) */}
-        <div className="hidden md:flex items-center h-10 border-t border-border bg-background px-6 md:px-16 overflow-x-auto no-scrollbar gap-8 shadow-sm">
-          <Link href="/products" className="text-sm font-medium text-foreground hover:text-accent whitespace-nowrap transition-colors flex items-center gap-1">
-            All Products
-          </Link>
-          {categories.map((cat) => (
-            <Link
-              key={cat.slug}
-              href={`/categories/${cat.slug}`}
-              className="text-sm font-medium text-foreground-secondary hover:text-accent whitespace-nowrap transition-colors"
-            >
-              {cat.name}
-            </Link>
-          ))}
-          <Link href="/stores" className="text-sm font-bold text-secondary-accent hover:text-orange-500 whitespace-nowrap transition-colors ml-auto flex items-center gap-1">
-            Local Stores <span className="px-1.5 py-0.5 bg-secondary-accent/10 rounded text-[10px]">NEW</span>
-          </Link>
-          <div className="flex items-center gap-4 ml-4 pl-4 border-l border-border">
-            <Link href="/seller/login" className="text-sm font-medium text-foreground-secondary hover:text-foreground whitespace-nowrap transition-colors">
-              Seller Login
-            </Link>
-            <Link href="/seller/register" className="text-sm font-bold text-accent hover:text-accent/80 whitespace-nowrap transition-colors">
-              Become a Seller
-            </Link>
           </div>
         </div>
       </header>

@@ -360,8 +360,11 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
             <ArrowLeft className="w-4 h-4 text-slate-600" />
           </Link>
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold text-slate-900">Order #{order.order_number}</h1>
+              <span className="text-sm text-slate-500 font-mono font-extrabold bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+                Invoice #{order.invoice_number || (order.order_number ? `INV-${order.order_number.replace("ORD-", "")}` : "INV-10007")}
+              </span>
               <span
                 className={`px-3 py-1 rounded-full text-xs font-bold ${
                   currentStatus === "DELIVERED"
@@ -418,6 +421,11 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
                       </div>
 
                       <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 font-mono text-[10px] text-blue-600 font-bold mb-0.5">
+                          <span>{item.order_item_code || `OI-${(order.order_number || "10000").replace("ORD-", "")}-${String(items.indexOf(item) + 1).padStart(3, "0")}`}</span>
+                          <span className="text-slate-300">|</span>
+                          <span className="text-slate-500 font-normal">SKU: {item.sku || prod?.sku || "N/A"}</span>
+                        </div>
                         <div className="font-bold text-slate-900 truncate">{item.title}</div>
                         <div className="text-slate-500">
                           Qty: {item.quantity} × {formatCurrency(Number(item.unit_price))}

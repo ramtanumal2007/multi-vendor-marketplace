@@ -130,12 +130,18 @@ export function mapInternalToFulfillmentStatus(internalStatus: string): string {
 
 export function formatSequentialCustomerId(index: number, existingCode?: string | null): string {
   if (existingCode && existingCode.startsWith("CUS-")) return existingCode;
-  return `CUS-${String(index + 1).padStart(6, "0")}`;
+  return `CUS-${String(index + 1).padStart(3, "0")}`;
 }
 
 export function formatSequentialSellerId(index: number, existingCode?: string | null): string {
   if (existingCode && (existingCode.startsWith("SEL-") || existingCode.startsWith("STORE-"))) return existingCode;
   return `SEL-${String(index + 1).padStart(6, "0")}`;
+}
+
+export function formatOrderItemId(itemCode?: string | null, orderNumber?: string | null, index: number = 0): string {
+  if (itemCode && itemCode.startsWith("OI-")) return itemCode;
+  const cleanOrderNum = (orderNumber || "10000").replace("ORD-", "");
+  return `OI-${cleanOrderNum}-${String(index + 1).padStart(3, "0")}`;
 }
 
 export function isRawUuid(val?: string | null): boolean {

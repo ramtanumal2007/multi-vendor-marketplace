@@ -1,21 +1,29 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Upload, Trash2, Copy, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase";
-import Image from "next/image";
+
+interface MediaFile {
+  id: string;
+  name: string;
+  created_at?: string;
+  updated_at?: string;
+  last_accessed_at?: string;
+  metadata?: Record<string, unknown>;
+}
 
 export default function AdminMediaPage() {
-  const [files, setFiles] = useState<any[]>([]);
+  const [files, setFiles] = useState<MediaFile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [bucket, setBucket] = useState("product-images");
   const { addToast } = useToast();
   const supabase = createClient();
 
-  const fetchFiles = async () => {
+  const fetchFiles = useCallback(async () => {
     setIsLoading(true);
     const { data, error } = await supabase.storage.from(bucket).list("", {
       limit: 100,
@@ -27,15 +35,15 @@ export default function AdminMediaPage() {
       addToast({ title: "Error fetching media", description: error.message, type: "error" });
     } else if (data) {
       // Filter out placeholders like .emptyFolderPlaceholder
-      const validFiles = data.filter((f: any) => f.name !== ".emptyFolderPlaceholder");
+      const validFiles = (data as MediaFile[]).filter((f) => f.name !== ".emptyFolderPlaceholder");
       setFiles(validFiles);
     }
     setIsLoading(false);
-  };
+  }, [bucket, supabase, addToast]);
 
   useEffect(() => {
     fetchFiles();
-  }, [bucket]);
+  }, [fetchFiles]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;

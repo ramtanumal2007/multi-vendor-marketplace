@@ -5,11 +5,33 @@ import { Modal } from "@/components/ui/Modal";
 import { Plus, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 
+export interface CouponRecord {
+  id?: string;
+  code?: string;
+  type?: "percentage" | "fixed";
+  value?: number;
+  min_order_amount?: number;
+  target_type?: "all" | "seller" | "membership_plan" | "category" | "product";
+  target_membership_plans?: string[];
+  target_sellers?: string[];
+  applicable_categories?: string[];
+  applicable_products?: string[];
+  is_first_order_only?: boolean;
+  auto_apply?: boolean;
+  stackable?: boolean;
+  max_total_redemptions?: number | null;
+  usage_limit?: number | null;
+  per_customer_limit?: number;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  is_active?: boolean;
+}
+
 interface CreateCouponModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  editingCoupon?: any | null;
+  editingCoupon?: CouponRecord | null;
 }
 
 export function CreateCouponModal({ isOpen, onClose, onSuccess, editingCoupon }: CreateCouponModalProps) {
@@ -122,7 +144,7 @@ export function CreateCouponModal({ isOpen, onClose, onSuccess, editingCoupon }:
         .eq("code", formattedCode);
 
       if (existing && existing.length > 0) {
-        const isSelf = editingCoupon && existing.some((c: any) => c.id === editingCoupon.id);
+        const isSelf = editingCoupon && existing.some((c: { id: string }) => c.id === editingCoupon.id);
         if (!isSelf) {
           setErrorMsg(`Coupon code "${formattedCode}" already exists.`);
           setIsSubmitting(false);

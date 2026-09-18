@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { CheckCircle2, AlertCircle, DollarSign, CreditCard, X, ShieldCheck } from "lucide-react";
+import { CheckCircle2, DollarSign, CreditCard, X, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 interface DeliveryConfirmationModalProps {
@@ -148,7 +148,7 @@ export function DeliveryConfirmationModal({
                     UPI / Online Payment
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Paid via UPI / QR Code at delivery or pre-paid online via Razorpay/Card.
+                    Paid via UPI / QR Code at delivery or pre-paid online.
                   </p>
                 </div>
               </label>

@@ -51,7 +51,7 @@ export function CartDrawer() {
                   </div>
                   <h3 className="text-xl font-bold">Your cart is empty</h3>
                   <p className="text-foreground-secondary text-sm px-4">
-                    Looks like you haven't added anything yet. Discover amazing local products!
+                    Looks like you haven&apos;t added anything yet. Discover amazing local products!
                   </p>
                   <Button variant="primary" className="mt-4 px-8 font-bold" onClick={closeDrawer}>
                     Start Shopping

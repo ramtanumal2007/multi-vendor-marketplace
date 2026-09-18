@@ -41,7 +41,7 @@ export async function GET() {
     }
 
     // Fetch history logs
-    const { data: historyData, error: _historyError } = await supabase
+    const { data: historyData } = await supabase
       .from("admin_notifications_log")
       .select("*")
       .order("created_at", { ascending: false })
@@ -62,7 +62,7 @@ export async function GET() {
 
     // Enrich history logs with recipient identity
     const sellerMap = new Map((sellers || []).map((s) => [s.id, s]));
-    const customerMap = new Map(
+    const customerMap = new Map<string, { id: string; full_name?: string | null; email?: string | null; role?: string }>(
       (customers || []).map((c) => [c.id, c])
     );
 
@@ -76,7 +76,7 @@ export async function GET() {
         .from("profiles")
         .select("id, full_name, email")
         .in("id", customerTargetIds);
-      (extraProfiles || []).forEach((p) => customerMap.set(p.id, p as any));
+      (extraProfiles || []).forEach((p) => customerMap.set(p.id, p));
     }
 
     const enrichedHistory = (historyData || []).map((log) => {

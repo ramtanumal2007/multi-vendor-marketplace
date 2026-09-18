@@ -18,14 +18,61 @@ function formatDate(dateString: string) {
   }).format(new Date(dateString));
 }
 
+interface CustomerOrder {
+  id: string;
+  order_number: string;
+  invoice_number?: string;
+  created_at: string;
+  internal_status?: string;
+  fulfillment_status: string;
+  payment_status: string;
+  total: number;
+  subtotal?: number;
+  tax_amount?: number;
+  delivery_charge?: number;
+  tip_amount?: number;
+  coupon_discount?: number;
+  applied_coupon_code?: string;
+  payment_method?: string;
+  shipping_address?: {
+    first_name?: string;
+    last_name?: string;
+    address1?: string;
+    address2?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    phone?: string;
+  };
+  email?: string;
+  [key: string]: unknown;
+}
+
+interface CustomerProfileRow {
+  id: string;
+  customer_id_code?: string;
+  full_name?: string;
+  phone?: string;
+  email?: string;
+}
+
+interface InvoiceItem {
+  id: string;
+  title: string;
+  price: number;
+  quantity: number;
+  sku?: string;
+  stores?: { name?: string } | null;
+}
+
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [customerProfile, setCustomerProfile] = useState<any>(null);
+  const [customerProfile, setCustomerProfile] = useState<CustomerProfileRow | null>(null);
 
   // Invoice Modal State
-  const [activeInvoiceOrder, setActiveInvoiceOrder] = useState<any>(null);
-  const [activeInvoiceItems, setActiveInvoiceItems] = useState<any[]>([]);
+  const [activeInvoiceOrder, setActiveInvoiceOrder] = useState<CustomerOrder | null>(null);
+  const [activeInvoiceItems, setActiveInvoiceItems] = useState<InvoiceItem[]>([]);
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
   const supabase = createClient();
@@ -53,9 +100,9 @@ export default function OrdersPage() {
       setIsLoading(false);
     }
     fetchOrders();
-  }, []);
+  }, [supabase]);
 
-  const handleOpenInvoice = async (order: any) => {
+  const handleOpenInvoice = async (order: CustomerOrder) => {
     setActiveInvoiceOrder(order);
     const { data: items } = await supabase
       .from("order_items")

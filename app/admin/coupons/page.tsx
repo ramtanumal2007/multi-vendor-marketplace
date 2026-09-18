@@ -1,21 +1,21 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Search, Plus, Trash2, Tag, Layers, User, Package, RefreshCw, Pencil } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Search, Plus, Trash2, Tag, RefreshCw, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/utils";
-import { CreateCouponModal } from "@/components/admin/CreateCouponModal";
+import { CreateCouponModal, type CouponRecord } from "@/components/admin/CreateCouponModal";
 
 export default function AdminCouponsPage() {
   const [searchTerm, setSearchTerm] = useState("");
-  const [coupons, setCoupons] = useState<any[]>([]);
+  const [coupons, setCoupons] = useState<CouponRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCoupon, setEditingCoupon] = useState<any | null>(null);
+  const [editingCoupon, setEditingCoupon] = useState<CouponRecord | null>(null);
   const supabase = createClient();
 
-  const fetchCoupons = async () => {
+  const fetchCoupons = useCallback(async () => {
     setIsLoading(true);
     const { data, error } = await supabase
       .from("coupons")
@@ -23,14 +23,14 @@ export default function AdminCouponsPage() {
       .order("created_at", { ascending: false });
 
     if (!error && data) {
-      setCoupons(data);
+      setCoupons(data as unknown as CouponRecord[]);
     }
     setIsLoading(false);
-  };
+  }, [supabase]);
 
   useEffect(() => {
     fetchCoupons();
-  }, []);
+  }, [fetchCoupons]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this coupon?")) return;
@@ -53,11 +53,11 @@ export default function AdminCouponsPage() {
 
   const filteredCoupons = coupons.filter(
     (c) =>
-      c.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.code || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.target_type && c.target_type.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const getTargetBadge = (targetType: string, plans: string[]) => {
+  const getTargetBadge = (targetType: string, plans?: string[]) => {
     switch (targetType) {
       case "seller":
         return <span className="bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded font-medium">Selected Sellers</span>;
@@ -119,10 +119,10 @@ export default function AdminCouponsPage() {
           <table className="w-full text-sm text-left">
             <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-10 border-b border-slate-200">
               <tr>
-                <th className="px-6 py-3">Code</th>
+                <th className="px-6 py-3">Coupon Code</th>
                 <th className="px-6 py-3">Discount</th>
-                <th className="px-6 py-3">Target Scope</th>
-                <th className="px-6 py-3">Redemptions</th>
+                <th className="px-6 py-3">Scope / Target</th>
+                <th className="px-6 py-3">Usage</th>
                 <th className="px-6 py-3 text-center">Status</th>
                 <th className="px-6 py-3 text-right">Actions</th>
               </tr>
@@ -149,17 +149,17 @@ export default function AdminCouponsPage() {
                     )}
                   </td>
                   <td className="px-6 py-4 text-slate-800 font-semibold">
-                    {coupon.type === "percentage" ? `${coupon.value}% OFF` : formatCurrency(coupon.value)}
+                    {coupon.type === "percentage" ? `${coupon.value}% OFF` : formatCurrency(Number(coupon.value || 0))}
                   </td>
                   <td className="px-6 py-4">
                     {getTargetBadge(coupon.target_type || "all", coupon.target_membership_plans)}
                   </td>
                   <td className="px-6 py-4 text-slate-600">
-                    {coupon.times_used || 0} / {coupon.max_total_redemptions || coupon.usage_limit || "∞"}
+                    {coupon.max_total_redemptions || coupon.usage_limit || "∞"}
                   </td>
                   <td className="px-6 py-4 text-center">
                     <button
-                      onClick={() => handleToggleActive(coupon.id, coupon.is_active)}
+                      onClick={() => coupon.id && handleToggleActive(coupon.id, Boolean(coupon.is_active))}
                       className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold cursor-pointer transition-colors ${
                         coupon.is_active ? "bg-green-100 text-green-800 hover:bg-green-200" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                       }`}
@@ -180,7 +180,7 @@ export default function AdminCouponsPage() {
                         <Pencil className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDelete(coupon.id)}
+                        onClick={() => coupon.id && handleDelete(coupon.id)}
                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                         title="Delete Coupon"
                       >

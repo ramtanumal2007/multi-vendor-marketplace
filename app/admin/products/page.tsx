@@ -21,6 +21,7 @@ interface CategoryItem {
 interface StoreItem {
   id: string;
   name: string;
+  status?: string;
 }
 
 interface ProductItem {
@@ -45,8 +46,8 @@ interface ProductItem {
 export default function AdminProductsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [products, setProducts] = useState<ProductItem[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [stores, setStores] = useState<any[]>([]);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [stores, setStores] = useState<StoreItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isMetaLoading, setIsMetaLoading] = useState(true);
   const [metaError, setMetaError] = useState<string | null>(null);
@@ -78,7 +79,7 @@ export default function AdminProductsPage() {
   const supabase = createClient();
   const { addToast } = useToast();
 
-  const fetchProductsData = async () => {
+  const fetchProductsData = React.useCallback(async () => {
     setIsLoading(true);
     const { data: productsData, error: prodError } = await supabase
       .from("products")
@@ -92,9 +93,9 @@ export default function AdminProductsPage() {
     }
 
     setIsLoading(false);
-  };
+  }, [supabase, addToast]);
 
-  const fetchMetadata = async () => {
+  const fetchMetadata = React.useCallback(async () => {
     setIsMetaLoading(true);
     setMetaError(null);
     try {
@@ -121,12 +122,12 @@ export default function AdminProductsPage() {
     } finally {
       setIsMetaLoading(false);
     }
-  };
+  }, [supabase]);
 
   useEffect(() => {
     fetchProductsData();
     fetchMetadata();
-  }, []);
+  }, [fetchProductsData, fetchMetadata]);
 
   const resetForm = () => {
     setFormError(null);
@@ -272,7 +273,7 @@ export default function AdminProductsPage() {
     const activeUrls = new Set(imageItems.map((item) => item.url));
     const pathsToRemove: string[] = [];
 
-    (currentImgs || []).forEach((row: any) => {
+    (currentImgs || []).forEach((row: { image_url: string }) => {
       if (!activeUrls.has(row.image_url)) {
         const storagePath = extractStoragePath(row.image_url);
         if (storagePath) pathsToRemove.push(storagePath);

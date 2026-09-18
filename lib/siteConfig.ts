@@ -1,3 +1,5 @@
+import { SupabaseClient } from "@supabase/supabase-js";
+
 export const DEFAULT_SITE_NAME = process.env.NEXT_PUBLIC_SITE_NAME || "Marketplace";
 
 export interface SiteConfig {
@@ -15,7 +17,7 @@ export const defaultSiteConfig: SiteConfig = {
   currencySymbol: "$",
 };
 
-export async function fetchSiteConfig(supabaseClient: Record<string, any> | null): Promise<SiteConfig> {
+export async function fetchSiteConfig(supabaseClient: SupabaseClient | null): Promise<SiteConfig> {
   try {
     if (!supabaseClient) return defaultSiteConfig;
     const { data } = await supabaseClient

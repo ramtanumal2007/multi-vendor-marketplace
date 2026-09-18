@@ -12,10 +12,29 @@ import Image from "next/image";
 import { formatCurrency } from "@/lib/utils";
 import { createClient } from "@/lib/supabase";
 
+interface CategoryProductItem {
+  id: string;
+  title: string;
+  slug?: string;
+  price: number;
+  sale_price?: number | null;
+  product_images?: Array<{ image_url: string }>;
+  rating?: number;
+  category_id?: string | null;
+  status: string;
+  description?: string | null;
+}
+
+interface CategoryData {
+  id: string;
+  name: string;
+  description?: string | null;
+}
+
 export default function CategoryPage({ params }: { params: { slug: string } }) {
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<CategoryProductItem[]>([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [quickViewProduct, setQuickViewProduct] = useState<any>(null);
+  const [quickViewProduct, setQuickViewProduct] = useState<CategoryProductItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sortBy, setSortBy] = useState("recommended");
   
@@ -23,7 +42,7 @@ export default function CategoryPage({ params }: { params: { slug: string } }) {
   const { addToast } = useToast();
   const supabase = createClient();
 
-  const [categoryInfo, setCategoryInfo] = useState<any>(null);
+  const [categoryInfo, setCategoryInfo] = useState<CategoryData | null>(null);
 
   useEffect(() => {
     async function fetchCategoryProducts() {
@@ -57,14 +76,14 @@ export default function CategoryPage({ params }: { params: { slug: string } }) {
       const { data, error } = await query;
       
       if (!error && data) {
-        setProducts(data);
+        setProducts(data as CategoryProductItem[]);
       }
       setIsLoading(false);
     }
     fetchCategoryProducts();
-  }, [params.slug, sortBy]);
+  }, [params.slug, sortBy, supabase]);
 
-  const handleQuickAdd = (product: any) => {
+  const handleQuickAdd = (product: CategoryProductItem) => {
     const effectivePrice = product.sale_price && product.sale_price > 0 && product.sale_price < product.price
       ? product.sale_price
       : product.price;

@@ -5,7 +5,39 @@ import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { Store as StoreIcon, Palette, FileText, Share2, Check } from "lucide-react";
 
-export default function StoreForm({ existingStore, sellerId }: { existingStore: any, sellerId: string }) {
+export interface StoreRecord {
+  id?: string;
+  name?: string;
+  slug?: string;
+  description?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  logo_url?: string | null;
+  banner_url?: string | null;
+  brand_color?: string | null;
+  primary_color?: string | null;
+  tagline?: string | null;
+  policies?: Record<string, unknown> | null;
+  status?: string;
+  tax_gst_number?: string | null;
+  bank_account_details?: string | null;
+  seo_title?: string | null;
+  seo_description?: string | null;
+  about_store?: string | null;
+  shipping_policy?: string | null;
+  return_policy?: string | null;
+  social_instagram?: string | null;
+  social_facebook?: string | null;
+  social_twitter?: string | null;
+  social_website?: string | null;
+}
+
+export default function StoreForm({ existingStore, sellerId }: { existingStore: StoreRecord | null; sellerId: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -176,7 +208,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="email"
               name="email"
               id="email"
-              defaultValue={existingStore?.email}
+              defaultValue={existingStore?.email ?? ""}
               required
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -188,7 +220,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="tel"
               name="phone"
               id="phone"
-              defaultValue={existingStore?.phone}
+              defaultValue={existingStore?.phone ?? ""}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
           </div>
@@ -201,7 +233,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="text"
               name="tax_gst_number"
               id="tax_gst_number"
-              defaultValue={existingStore?.tax_gst_number}
+              defaultValue={existingStore?.tax_gst_number ?? ""}
               placeholder="e.g. 22AAAAA0000A1Z5"
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -213,7 +245,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="text"
               name="bank_account_details"
               id="bank_account_details"
-              defaultValue={existingStore?.bank_account_details}
+              defaultValue={existingStore?.bank_account_details ?? ""}
               placeholder="Bank Name, Account #, IFSC / SWIFT Code"
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -227,7 +259,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="text"
               name="seo_title"
               id="seo_title"
-              defaultValue={existingStore?.seo_title}
+              defaultValue={existingStore?.seo_title ?? ""}
               placeholder="Custom Search Engine Title"
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -239,7 +271,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="text"
               name="seo_description"
               id="seo_description"
-              defaultValue={existingStore?.seo_description}
+              defaultValue={existingStore?.seo_description ?? ""}
               placeholder="Search engine snippet summary"
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -260,7 +292,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="url"
               name="logo_url"
               id="logo_url"
-              defaultValue={existingStore?.logo_url}
+              defaultValue={existingStore?.logo_url ?? ""}
               placeholder="https://..."
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -272,7 +304,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="url"
               name="banner_url"
               id="banner_url"
-              defaultValue={existingStore?.banner_url}
+              defaultValue={existingStore?.banner_url ?? ""}
               placeholder="https://..."
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -311,7 +343,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
             name="description"
             id="description"
             rows={3}
-            defaultValue={existingStore?.description}
+            defaultValue={existingStore?.description ?? ""}
             placeholder="Brief overview of your store..."
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
           />
@@ -323,7 +355,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
             name="about_store"
             id="about_store"
             rows={4}
-            defaultValue={existingStore?.about_store}
+            defaultValue={existingStore?.about_store ?? ""}
             placeholder="Tell customers about your brand origin and values..."
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
           />
@@ -336,7 +368,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               name="shipping_policy"
               id="shipping_policy"
               rows={3}
-              defaultValue={existingStore?.shipping_policy}
+              defaultValue={existingStore?.shipping_policy ?? ""}
               placeholder="e.g. Ships within 2-3 business days nationwide..."
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -348,7 +380,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               name="return_policy"
               id="return_policy"
               rows={3}
-              defaultValue={existingStore?.return_policy}
+              defaultValue={existingStore?.return_policy ?? ""}
               placeholder="e.g. 14 days easy returns policy for unused items..."
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -369,7 +401,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="url"
               name="social_instagram"
               id="social_instagram"
-              defaultValue={existingStore?.social_instagram}
+              defaultValue={existingStore?.social_instagram ?? ""}
               placeholder="https://instagram.com/..."
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -381,7 +413,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="url"
               name="social_facebook"
               id="social_facebook"
-              defaultValue={existingStore?.social_facebook}
+              defaultValue={existingStore?.social_facebook ?? ""}
               placeholder="https://facebook.com/..."
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -393,7 +425,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="url"
               name="social_twitter"
               id="social_twitter"
-              defaultValue={existingStore?.social_twitter}
+              defaultValue={existingStore?.social_twitter ?? ""}
               placeholder="https://twitter.com/..."
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
@@ -405,7 +437,7 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
               type="url"
               name="social_website"
               id="social_website"
-              defaultValue={existingStore?.social_website}
+              defaultValue={existingStore?.social_website ?? ""}
               placeholder="https://..."
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />

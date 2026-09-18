@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Star,
   Minus,
   Plus,
   ChevronRight,
@@ -27,17 +26,64 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
+interface ProductImageItem {
+  id?: string;
+  image_url: string;
+}
+
+interface ProductStoreInfo {
+  id: string;
+  name: string;
+  slug?: string;
+  address_line1?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  processing_time_days?: number;
+}
+
+interface DetailedProduct {
+  id: string;
+  title: string;
+  slug?: string;
+  description?: string | null;
+  price: number;
+  sale_price?: number | null;
+  sku?: string | null;
+  stock_quantity?: number | null;
+  track_inventory?: boolean;
+  status: string;
+  category_id?: string | null;
+  categories?: { name: string } | null;
+  stores?: ProductStoreInfo | ProductStoreInfo[] | null;
+  product_images?: ProductImageItem[];
+  product_options?: unknown[];
+  product_variants?: unknown[];
+  delivery_fee?: number | null;
+  tax_rate?: number | null;
+}
+
+interface RelatedProductItem {
+  id: string;
+  title: string;
+  slug?: string;
+  price: number;
+  sale_price?: number | null;
+  stock_quantity?: number | null;
+  category_id?: string | null;
+  categories?: { name: string } | null;
+  product_images?: ProductImageItem[];
+}
+
 export default function ProductDetailPage({ params }: { params: { slug: string } }) {
-  const [product, setProduct] = useState<any>(null);
+  const [product, setProduct] = useState<DetailedProduct | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isBuyNowLoading, setIsBuyNowLoading] = useState(false);
 
-  const [relatedProducts, setRelatedProducts] = useState<any[]>([]);
+  const [relatedProducts, setRelatedProducts] = useState<RelatedProductItem[]>([]);
   const [isRelatedLoading, setIsRelatedLoading] = useState(true);
 
   const [selectedImage, setSelectedImage] = useState(0);
-  const [selectedSize, setSelectedSize] = useState("");
-  const [selectedColor, setSelectedColor] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState("description");
   const [pinCode, setPinCode] = useState("");
@@ -87,11 +133,11 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
         return;
       }
 
-      setProduct(data);
+      setProduct(data as DetailedProduct);
       setIsLoading(false);
     }
     fetchProduct();
-  }, [params.slug]);
+  }, [params.slug, router, supabase, addToast]);
 
   // Fetch Related Products (Phase 3)
   useEffect(() => {
@@ -101,8 +147,8 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
       setIsRelatedLoading(true);
       const selectFields = "*, product_images(image_url), categories(name)";
 
-      let sameCategory: any[] = [];
-      if (product.category_id) {
+      let sameCategory: RelatedProductItem[] = [];
+      if (product?.category_id) {
         const { data } = await supabase
           .from("products")
           .select(selectFields)
@@ -112,12 +158,12 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
           .order("stock_quantity", { ascending: false })
           .limit(8);
 
-        if (data) sameCategory = data;
+        if (data) sameCategory = data as RelatedProductItem[];
       }
 
-      let fallbacks: any[] = [];
+      let fallbacks: RelatedProductItem[] = [];
       if (sameCategory.length < 8) {
-        const excludeIds = [product.id, ...sameCategory.map((p) => p.id)];
+        const excludeIds = [product?.id, ...sameCategory.map((p) => p.id)].filter(Boolean);
         const needed = 8 - sameCategory.length;
 
         let fallbackQuery = supabase
@@ -132,7 +178,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
         }
 
         const { data: fbData } = await fallbackQuery;
-        if (fbData) fallbacks = fbData;
+        if (fbData) fallbacks = fbData as RelatedProductItem[];
       }
 
       setRelatedProducts([...sameCategory, ...fallbacks]);
@@ -140,9 +186,9 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
     }
 
     fetchRelatedProducts();
-  }, [product?.id, product?.category_id]);
+  }, [product?.id, product?.category_id, supabase]);
 
-  const handleAddToCartWithCorrectPrice = (e: React.MouseEvent) => {
+  const handleAddToCartWithCorrectPrice = () => {
     if (!product) return;
 
     // Stock Validation
@@ -164,13 +210,13 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
 
     addItem(
       {
-        id: `${product.id}-${selectedSize}-${selectedColor}`,
+        id: product.id,
         productId: product.id,
         title: product.title,
         price: effectivePrice,
         mrp: product.price,
         image: product.product_images?.[0]?.image_url || "",
-        variantInfo: selectedSize ? `Variant: ${selectedSize}` : undefined,
+        variantInfo: undefined,
       },
       quantity
     );
@@ -231,14 +277,14 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
     const effectivePrice = hasDiscount ? (product.sale_price as number) : product.price;
 
     const buyItem = {
-      id: `${product.id}-${selectedSize}-${selectedColor}`,
+      id: product.id,
       productId: product.id,
       title: product.title,
       price: effectivePrice,
       mrp: product.price,
       quantity,
       image: product.product_images?.[0]?.image_url || "",
-      variantInfo: selectedSize ? `Variant: ${selectedSize}` : undefined,
+      variantInfo: undefined,
     };
 
     setBuyNowItem(buyItem);
@@ -260,7 +306,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-[1440px] px-6 md:px-16 py-12 w-full pt-[80px] md:pt-[100px]">
+      <div className="mx-auto max-w-[1440px] px-6 md:px-16 py-8 md:py-12 w-full">
         <div className="animate-pulse flex flex-col lg:flex-row gap-12 lg:gap-24">
           <div className="w-full lg:w-1/2 aspect-square bg-slate-200 dark:bg-slate-800 rounded-2xl" />
           <div className="w-full lg:w-1/2 flex flex-col gap-6">
@@ -278,7 +324,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
 
   const images =
     product.product_images && product.product_images.length > 0
-      ? product.product_images.map((img: any) => img.image_url)
+      ? product.product_images.map((img: ProductImageItem) => img.image_url)
       : ["https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800&q=80"];
 
   const hasDiscount = Boolean(
@@ -300,7 +346,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
   const displaySku = formatDisplaySku(product.sku);
 
   return (
-    <div className="mx-auto max-w-[1440px] px-4 md:px-16 py-8 md:py-12 w-full pt-[80px] md:pt-[100px] mb-24 md:mb-0">
+    <div className="mx-auto max-w-[1440px] px-4 md:px-16 py-8 md:py-12 w-full mb-24 md:mb-0">
       {/* Breadcrumbs */}
       <nav className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-foreground-secondary mb-6 md:mb-8 overflow-x-auto whitespace-nowrap pb-2 no-scrollbar">
         <Link href="/" className="hover:text-accent">
@@ -376,7 +422,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
           {/* Stock Status Badge */}
           <div className="mb-4">
             {product.track_inventory ? (
-              product.stock_quantity > 0 ? (
+              (product.stock_quantity ?? 0) > 0 ? (
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                   <Package className="w-3.5 h-3.5 text-emerald-600" />
                   In Stock ({product.stock_quantity} available)
@@ -433,7 +479,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
             <Button
               variant="primary"
               size="lg"
-              disabled={isBuyNowLoading || (product.track_inventory && product.stock_quantity <= 0)}
+              disabled={isBuyNowLoading || Boolean(product.track_inventory && (product.stock_quantity ?? 0) <= 0)}
               className="h-14 text-base font-bold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all bg-gradient-to-r from-amber-600 to-orange-600 text-white border-none flex items-center justify-center gap-2 disabled:opacity-50"
               onClick={handleBuyNow}
             >
@@ -558,11 +604,11 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
           </div>
         ) : relatedProducts.length > 0 ? (
           <div className="flex sm:grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6 overflow-x-auto pb-4 snap-x no-scrollbar">
-            {relatedProducts.map((relProd: any) => {
+            {relatedProducts.map((relProd: RelatedProductItem) => {
               const relHasDiscount = Boolean(
                 relProd.sale_price && relProd.sale_price > 0 && relProd.sale_price < relProd.price
               );
-              const relEffectivePrice = relHasDiscount ? relProd.sale_price : relProd.price;
+              const relEffectivePrice = Number(relHasDiscount ? relProd.sale_price : relProd.price) || relProd.price;
               const relMrp = relProd.price;
               const relDiscountPct = relHasDiscount
                 ? Math.round(((relMrp - relEffectivePrice) / relMrp) * 100)
@@ -648,7 +694,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
         </Button>
         <Button
           variant="primary"
-          disabled={isBuyNowLoading || (product.track_inventory && product.stock_quantity <= 0)}
+          disabled={isBuyNowLoading || Boolean(product.track_inventory && (product.stock_quantity ?? 0) <= 0)}
           className="flex-1 h-12 text-xs font-bold bg-gradient-to-r from-amber-600 to-orange-600 text-white border-none shadow-md"
           onClick={handleBuyNow}
         >

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Search, Plus, MapPin, CheckCircle2, XCircle, Power, Trash2, Loader2, RefreshCw, Save, IndianRupee } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Search, Plus, MapPin, CheckCircle2, XCircle, Power, Trash2, Loader2, RefreshCw, Save } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase";
 import { useToast } from "@/components/ui/Toast";
@@ -45,11 +45,7 @@ export default function AdminCitiesPage() {
   const supabase = createClient();
   const { addToast } = useToast();
 
-  useEffect(() => {
-    fetchCities();
-  }, []);
-
-  async function fetchCities() {
+  const fetchCities = useCallback(async () => {
     setIsLoading(true);
     try {
       const { data, error } = await supabase
@@ -60,7 +56,7 @@ export default function AdminCitiesPage() {
       if (error) throw error;
 
       if (data && data.length > 0) {
-        const formatted = data.map((c: any) => ({
+        const formatted = data.map((c: { id: string; name: string; delivery_fee?: number | string | null; is_active: boolean; created_at: string; updated_at: string }) => ({
           ...c,
           delivery_fee: Number(c.delivery_fee ?? 40),
         }));
@@ -77,7 +73,7 @@ export default function AdminCitiesPage() {
           .select();
 
         if (!seedErr && seeded) {
-          setCities(seeded.map((c: any) => ({ ...c, delivery_fee: Number(c.delivery_fee || 40) })));
+          setCities(seeded.map((c: { id: string; name: string; delivery_fee?: number | string | null; is_active: boolean; created_at: string; updated_at: string }) => ({ ...c, delivery_fee: Number(c.delivery_fee || 40) })));
         } else {
           setCities(
             DEFAULT_CITIES.map((c, index) => ({
@@ -91,17 +87,22 @@ export default function AdminCitiesPage() {
           );
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error fetching delivery cities:", err);
+      const message = err instanceof Error ? err.message : "Failed to fetch city list.";
       addToast({
         title: "Error fetching cities",
-        description: err.message || "Failed to fetch city list.",
+        description: message,
         type: "error",
       });
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [supabase, addToast]);
+
+  useEffect(() => {
+    fetchCities();
+  }, [fetchCities]);
 
   const handleAddCity = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,10 +146,11 @@ export default function AdminCitiesPage() {
           )
         );
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not insert new city.";
       addToast({
         title: "Failed to add city",
-        description: err.message || "Could not insert new city.",
+        description: message,
         type: "error",
       });
     } finally {
@@ -193,10 +195,11 @@ export default function AdminCitiesPage() {
       const copy = { ...editingFees };
       delete copy[city.id];
       setEditingFees(copy);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to update delivery fee.";
       addToast({
         title: "Save Failed",
-        description: err.message || "Failed to update delivery fee.",
+        description: message,
         type: "error",
       });
     } finally {
@@ -226,10 +229,11 @@ export default function AdminCitiesPage() {
           : `${city.name} will NO LONGER appear in NEW customer address dropdowns. Existing orders remain unaffected.`,
         type: newStatus ? "success" : "info",
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to update city status.";
       addToast({
         title: "Update Failed",
-        description: err.message || "Failed to update city status.",
+        description: message,
         type: "error",
       });
     }
@@ -255,10 +259,11 @@ export default function AdminCitiesPage() {
         description: `${city.name} removed from city management list. Historical orders remain intact.`,
         type: "success",
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not delete city record.";
       addToast({
         title: "Delete Failed",
-        description: err.message || "Could not delete city record.",
+        description: message,
         type: "error",
       });
     }

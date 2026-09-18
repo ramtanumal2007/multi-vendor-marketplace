@@ -3,6 +3,16 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { Store } from "lucide-react";
 
+interface AdminStoreRow {
+  id: string;
+  name: string;
+  slug: string;
+  email?: string;
+  phone?: string;
+  status: string;
+  seller_profiles?: { business_name?: string | null } | null;
+}
+
 export default async function AdminStoresPage() {
   const cookieStore = cookies();
   const supabase = createServerClient(
@@ -41,7 +51,7 @@ export default async function AdminStoresPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 text-sm">
-              {stores.map((store: any) => (
+              {stores.map((store: AdminStoreRow) => (
                 <tr key={store.id} className="hover:bg-gray-50">
                   <td className="p-4 font-medium text-gray-900">
                     <div>{store.name}</div>

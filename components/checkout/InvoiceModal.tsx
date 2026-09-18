@@ -1,18 +1,53 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { X, Printer, Download, FileText, CheckCircle2, Building2 } from "lucide-react";
+import { X, Printer, Download, FileText } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { formatCurrency, formatExactDateTime } from "@/lib/utils";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 
+export interface InvoiceItem {
+  id?: string;
+  order_id?: string;
+  order_item_code?: string;
+  product_id?: string;
+  store_id?: string;
+  title?: string;
+  sku?: string;
+  quantity?: number;
+  unit_price?: number;
+  line_total?: number;
+  price?: number;
+  variant_info?: string;
+  stores?: unknown;
+  products?: unknown;
+}
+
 export interface InvoiceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  order: any;
-  items: any[];
-  customerProfile?: any;
+  order: {
+    id?: string;
+    order_number?: string;
+    invoice_number?: string;
+    email?: string;
+    customer_id_code?: string;
+    created_at?: string;
+    shipping_address?: unknown;
+    billing_address?: unknown;
+    payment_method?: string;
+    payment_status?: string;
+    internal_status?: string;
+    fulfillment_status?: string;
+    subtotal?: number;
+    discount_amount?: number;
+    shipping_cost?: number;
+    tax_amount?: number;
+    total?: number;
+  };
+  items: InvoiceItem[];
+  customerProfile?: { full_name?: string | null; customer_id_code?: string | null } | null;
 }
 
 export function InvoiceModal({ isOpen, onClose, order, items, customerProfile }: InvoiceModalProps) {
@@ -21,8 +56,7 @@ export function InvoiceModal({ isOpen, onClose, order, items, customerProfile }:
 
   if (!isOpen || !order) return null;
 
-  const shipping = order.shipping_address || {};
-  const billing = order.billing_address || shipping;
+  const shipping = (order.shipping_address as Record<string, string | undefined>) || {};
 
   const invoiceNumber =
     order.invoice_number ||
@@ -199,11 +233,12 @@ export function InvoiceModal({ isOpen, onClose, order, items, customerProfile }:
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {items.map((item: any, idx: number) => {
+                  {items.map((item: InvoiceItem, idx: number) => {
                     const itemCode =
                       item.order_item_code ||
-                      `OI-${(order.order_number || "10000").replace("ORD-", "")}-${String(idx + 1).padStart(3, "0")}`;
-                    const itemSku = item.sku || item.products?.sku || "N/A";
+                      `OI-${((order.order_number as string) || "10000").replace("ORD-", "")}-${String(idx + 1).padStart(3, "0")}`;
+                    const prodObj = typeof item.products === "object" && item.products !== null ? (item.products as { sku?: string }) : null;
+                    const itemSku = item.sku || prodObj?.sku || "N/A";
 
                     return (
                       <tr key={item.id || idx}>
@@ -218,9 +253,9 @@ export function InvoiceModal({ isOpen, onClose, order, items, customerProfile }:
                         </td>
                         <td className="px-4 py-3 text-slate-600 font-mono text-[11px]">{itemSku}</td>
                         <td className="px-4 py-3 text-center font-bold text-slate-700">{item.quantity}</td>
-                        <td className="px-4 py-3 text-right font-mono">{formatCurrency(item.unit_price)}</td>
+                        <td className="px-4 py-3 text-right font-mono">{formatCurrency(item.unit_price || 0)}</td>
                         <td className="px-4 py-3 text-right font-mono font-bold text-slate-900">
-                          {formatCurrency(item.line_total)}
+                          {formatCurrency(item.line_total || 0)}
                         </td>
                       </tr>
                     );
@@ -260,10 +295,10 @@ export function InvoiceModal({ isOpen, onClose, order, items, customerProfile }:
                   <span>Items Subtotal:</span>
                   <span className="font-mono">{formatCurrency(order.subtotal || 0)}</span>
                 </div>
-                {order.discount_amount > 0 && (
+                {Boolean(order.discount_amount && order.discount_amount > 0) && (
                   <div className="flex justify-between text-emerald-600 font-semibold">
                     <span>Discount:</span>
-                    <span className="font-mono">-{formatCurrency(order.discount_amount)}</span>
+                    <span className="font-mono">-{formatCurrency(Number(order.discount_amount))}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-slate-600">

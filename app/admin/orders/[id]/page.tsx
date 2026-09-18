@@ -2,14 +2,12 @@
 
 export const dynamic = "force-dynamic";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft,
   Package,
   Clock,
   CheckCircle2,
-  Truck,
-  XCircle,
   Loader2,
   User,
   Store,
@@ -38,12 +36,142 @@ import { SellerDetailsModal } from "@/components/admin/SellerDetailsModal";
 import { DeliveryConfirmationModal } from "@/components/admin/DeliveryConfirmationModal";
 import { InvoiceModal } from "@/components/checkout/InvoiceModal";
 
+interface AdminOrderDetail {
+  id: string;
+  order_number: string;
+  invoice_number?: string;
+  user_id?: string;
+  email: string;
+  phone?: string;
+  customer_id_code?: string;
+  shipping_address?: {
+    first_name?: string;
+    last_name?: string;
+    address1?: string;
+    address2?: string;
+    address_line1?: string;
+    address_line2?: string;
+    landmark?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    country?: string;
+    phone?: string;
+    google_maps_url?: string;
+    coordinates?: { lat?: number; lng?: number };
+    [key: string]: unknown;
+  };
+  total: number;
+  subtotal?: number;
+  tax_amount?: number;
+  delivery_charge?: number;
+  shipping_cost?: number;
+  discount_amount?: number;
+  tip_amount?: number;
+  coupon_discount?: number;
+  applied_coupon_code?: string;
+  shipping_method?: string;
+  payment_method?: string;
+  payment_status: string;
+  fulfillment_status: string;
+  internal_status?: string;
+  created_at: string;
+  notes?: string;
+  [key: string]: unknown;
+}
+
+interface AdminOrderItem {
+  id: string;
+  order_id: string;
+  order_item_code?: string;
+  product_id?: string;
+  store_id?: string;
+  title?: string;
+  price: number;
+  unit_price?: number;
+  line_total?: number;
+  quantity: number;
+  sku?: string;
+  variant_info?: string;
+  stores?: {
+    id: string;
+    name: string;
+    status: string;
+    seller_id?: string;
+    seller_profiles?: {
+      id: string;
+      business_name?: string;
+      contact_name?: string;
+      business_email?: string;
+    } | {
+      id: string;
+      business_name?: string;
+      contact_name?: string;
+      business_email?: string;
+    }[];
+  } | {
+    id: string;
+    name: string;
+    status: string;
+    seller_id?: string;
+    seller_profiles?: {
+      id: string;
+      business_name?: string;
+      contact_name?: string;
+      business_email?: string;
+    } | {
+      id: string;
+      business_name?: string;
+      contact_name?: string;
+      business_email?: string;
+    }[];
+  }[];
+  products?: {
+    id?: string;
+    title?: string;
+    sku?: string;
+    product_images?: { image_url: string }[];
+  };
+  [key: string]: unknown;
+}
+
+interface TimelineItem {
+  id: string;
+  order_id: string;
+  status: string;
+  note?: string;
+  created_at: string;
+  created_by?: string;
+  profiles?: {
+    full_name?: string;
+    role?: string;
+  };
+}
+
+interface CustomerProfileData {
+  id: string;
+  email: string;
+  full_name?: string;
+  phone?: string;
+  avatar_url?: string;
+  customer_id_code?: string;
+}
+
+interface SellerProfileItem {
+  seller_id: string;
+  store_id: string;
+  store_name: string;
+  store_status: string;
+  owner_name: string;
+  email: string;
+}
+
 export default function AdminOrderDetailsPage({ params }: { params: { id: string } }) {
-  const [order, setOrder] = useState<any>(null);
-  const [items, setItems] = useState<any[]>([]);
-  const [timeline, setTimeline] = useState<any[]>([]);
-  const [customerProfile, setCustomerProfile] = useState<any>(null);
-  const [sellerProfilesMap, setSellerProfilesMap] = useState<Map<string, any>>(new Map());
+  const [order, setOrder] = useState<AdminOrderDetail | null>(null);
+  const [items, setItems] = useState<AdminOrderItem[]>([]);
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [customerProfile, setCustomerProfile] = useState<CustomerProfileData | null>(null);
+  const [sellerProfilesMap, setSellerProfilesMap] = useState<Map<string, SellerProfileItem>>(new Map());
 
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -63,42 +191,7 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
   const supabase = createClient();
   const { addToast } = useToast();
 
-  useEffect(() => {
-    fetchOrderDetails();
-
-    const channel = supabase
-      .channel(`admin-order-${params.id}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${params.id}` },
-        (payload: any) => {
-          setOrder(payload.new);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "order_timeline", filter: `order_id=eq.${params.id}` },
-        (payload: any) => {
-          setTimeline((prev) => {
-            if (prev.some((t) => t.id === payload.new.id)) return prev;
-
-            const norm = normalizeInternalStatus(payload.new.status);
-            setCurrentStatus(norm);
-
-            return [payload.new, ...prev].sort(
-              (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-            );
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [params.id]);
-
-  async function fetchOrderDetails() {
+  const fetchOrderDetails = useCallback(async () => {
     setIsLoading(true);
 
     try {
@@ -132,8 +225,8 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
       setItems(itemsData || []);
 
       // Build seller profiles map from items
-      const sMap = new Map<string, any>();
-      (itemsData || []).forEach((item: any) => {
+      const sMap = new Map<string, SellerProfileItem>();
+      (itemsData || []).forEach((item: AdminOrderItem) => {
         const storeObj = Array.isArray(item.stores) ? item.stores[0] : item.stores;
         if (storeObj) {
           const sellerProf = Array.isArray(storeObj.seller_profiles)
@@ -163,16 +256,52 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
 
       setTimeline(timelineData || []);
       setCurrentStatus(normalizeInternalStatus(orderData.internal_status || orderData.fulfillment_status));
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load order details.";
       addToast({
         title: "Error",
-        description: err.message || "Failed to load order details.",
+        description: message,
         type: "error",
       });
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [params.id, supabase, addToast]);
+
+  useEffect(() => {
+    fetchOrderDetails();
+
+    const channel = supabase
+      .channel(`admin-order-${params.id}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${params.id}` },
+        (payload: { new: AdminOrderDetail }) => {
+          setOrder(payload.new);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "order_timeline", filter: `order_id=eq.${params.id}` },
+        (payload: { new: TimelineItem }) => {
+          setTimeline((prev) => {
+            if (prev.some((t) => t.id === payload.new.id)) return prev;
+
+            const norm = normalizeInternalStatus(payload.new.status);
+            setCurrentStatus(norm);
+
+            return [payload.new, ...prev].sort(
+              (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [params.id, supabase, fetchOrderDetails]);
 
   const handleConfirmDelivery = async (paymentMethod: string) => {
     setIsUpdating(true);
@@ -183,7 +312,7 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
         data: { user },
       } = await supabase.auth.getUser();
 
-      const { data, error } = await supabase.rpc("confirm_order_delivery", {
+      const { error } = await supabase.rpc("confirm_order_delivery", {
         p_order_id: params.id,
         p_payment_method: paymentMethod,
         p_admin_id: user?.id,
@@ -199,10 +328,11 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
 
       setIsDeliveryModalOpen(false);
       await fetchOrderDetails();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to confirm delivery.";
       addToast({
         title: "Error",
-        description: err.message || "Failed to confirm delivery.",
+        description: message,
         type: "error",
       });
     } finally {
@@ -271,10 +401,11 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
           );
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to update status.";
       addToast({
         title: "Error",
-        description: err.message || "Failed to update status.",
+        description: message,
         type: "error",
       });
     } finally {
@@ -315,10 +446,11 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
       if (newEvent) {
         setTimeline((prev) => [newEvent, ...prev]);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to post note.";
       addToast({
         title: "Error",
-        description: err.message || "Failed to post note.",
+        description: message,
         type: "error",
       });
     } finally {
@@ -649,7 +781,7 @@ export default function AdminOrderDetailsPage({ params }: { params: { id: string
                 <span className="text-slate-400 block font-medium">Customer Name</span>
                 {order.user_id ? (
                   <button
-                    onClick={() => setSelectedCustomerId(order.user_id)}
+                    onClick={() => setSelectedCustomerId(order.user_id || null)}
                     className="font-bold text-blue-600 hover:text-blue-800 hover:underline text-sm inline-flex items-center gap-1"
                   >
                     {customerName}

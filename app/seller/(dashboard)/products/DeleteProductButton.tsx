@@ -22,7 +22,7 @@ export default function DeleteProductButton({ productId, productTitle }: { produ
         .eq("product_id", productId);
 
       const pathsToRemove: string[] = [];
-      (prodImgs || []).forEach((img: any) => {
+      (prodImgs || []).forEach((img: { image_url: string }) => {
         const path = extractStoragePath(img.image_url);
         if (path) pathsToRemove.push(path);
       });

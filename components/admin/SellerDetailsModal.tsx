@@ -3,9 +3,6 @@
 import React, { useState, useEffect } from "react";
 import {
   X,
-  Mail,
-  Phone,
-  Calendar,
   Store as StoreIcon,
   CheckCircle,
   XCircle,
@@ -13,7 +10,6 @@ import {
   Award,
   Zap,
   MapPin,
-  FileText,
   User,
   Package,
   ExternalLink,
@@ -27,8 +23,6 @@ import {
   formatExactDateTime,
   formatRelativeTime,
   formatSequentialSellerId,
-  formatSequentialCustomerId,
-  getGoogleMapsUrl,
   normalizeInternalStatus,
 } from "@/lib/utils";
 import Link from "next/link";
@@ -94,7 +88,6 @@ export function SellerDetailsModal({
   isOpen,
   onClose,
   onSelectCustomer,
-  onSelectOrder,
   onRefresh,
 }: SellerDetailsModalProps) {
   const [seller, setSeller] = useState<SellerProfile | null>(null);
@@ -104,7 +97,7 @@ export function SellerDetailsModal({
 
   // Action Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogAction, setDialogAction] = useState<"approve" | "reject" | "return_for_correction" | "suspend">("approve");
+  const [dialogAction, setDialogAction] = useState<"approve" | "reject" | "return_for_correction" | "suspend" | "unsuspend">("approve");
   const [adminComment, setAdminComment] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -152,13 +145,32 @@ export function SellerDetailsModal({
           .eq("store_id", storeData.id);
 
         if (orderItems && orderItems.length > 0) {
+          interface RawOrderDetails {
+            id: string;
+            order_number: string;
+            user_id: string | null;
+            email?: string;
+            shipping_address?: { first_name?: string; last_name?: string; phone?: string } | null;
+            payment_status: string;
+            fulfillment_status: string;
+            created_at: string;
+          }
+
+          interface OrderItemRow {
+            order_id: string;
+            line_total: number;
+            title: string;
+            quantity: number;
+            orders: RawOrderDetails | RawOrderDetails[] | null;
+          }
+
           const orderMap = new Map<string, {
-            ord: any;
+            ord: RawOrderDetails;
             totalSellerAmount: number;
             items: string[];
           }>();
 
-          orderItems.forEach((item: any) => {
+          ((orderItems || []) as unknown as OrderItemRow[]).forEach((item) => {
             const ord = Array.isArray(item.orders) ? item.orders[0] : item.orders;
             if (!ord) return;
 
@@ -176,16 +188,16 @@ export function SellerDetailsModal({
           // Fetch profiles for customer names
           const userIds = Array.from(orderMap.values())
             .map((v) => v.ord.user_id)
-            .filter(Boolean);
+            .filter(Boolean) as string[];
 
-          let profilesMap = new Map<string, { full_name: string; phone: string }>();
+          const profilesMap = new Map<string, { full_name: string; phone: string }>();
           if (userIds.length > 0) {
             const { data: profiles } = await supabase
               .from("profiles")
               .select("id, full_name, phone")
               .in("id", userIds);
 
-            (profiles || []).forEach((p: any) => {
+            ((profiles || []) as Array<{ id: string; full_name?: string | null; phone?: string | null }>).forEach((p) => {
               profilesMap.set(p.id, { full_name: p.full_name || "", phone: p.phone || "" });
             });
           }
@@ -220,10 +232,11 @@ export function SellerDetailsModal({
       } else {
         setIncomingOrders([]);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errObj = err as Error;
       addToast({
         title: "Error",
-        description: err.message || "Failed to load seller details.",
+        description: errObj.message || "Failed to load seller details.",
         type: "error",
       });
     } finally {
@@ -231,7 +244,7 @@ export function SellerDetailsModal({
     }
   };
 
-  const handleActionClick = (action: "approve" | "reject" | "return_for_correction" | "suspend") => {
+  const handleActionClick = (action: "approve" | "reject" | "return_for_correction" | "suspend" | "unsuspend") => {
     setDialogAction(action);
     setAdminComment("");
     setDialogOpen(true);
@@ -254,6 +267,17 @@ export function SellerDetailsModal({
         const { error } = await supabase.rpc("suspend_seller", { p_seller_id: seller.id });
         if (error) throw error;
         addToast({ title: "Suspended", description: "Seller suspended.", type: "success" });
+      } else if (dialogAction === "unsuspend") {
+        const { error } = await supabase.rpc("unsuspend_seller", { p_seller_id: seller.id });
+        if (error) {
+          // Fallback direct updates if RPC not yet deployed on DB instance
+          const { error: err1 } = await supabase.from("seller_profiles").update({ verification_status: "approved", updated_at: new Date().toISOString() }).eq("id", seller.id);
+          if (err1) throw err1;
+          await supabase.from("profiles").update({ role: "seller", updated_at: new Date().toISOString() }).eq("id", seller.id);
+          await supabase.from("stores").update({ status: "approved", updated_at: new Date().toISOString() }).eq("seller_id", seller.id);
+          await supabase.from("seller_application_events").insert({ seller_id: seller.id, event_type: "unsuspended" });
+        }
+        addToast({ title: "Reactivated", description: "Seller has been unsuspended and reactivated.", type: "success" });
       } else if (dialogAction === "return_for_correction") {
         if (!adminComment.trim()) throw new Error("Correction reason is required.");
         const { error } = await supabase.rpc("return_for_correction", {
@@ -267,10 +291,11 @@ export function SellerDetailsModal({
       setDialogOpen(false);
       fetchSellerDetails(seller.id);
       if (onRefresh) onRefresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errObj = err as Error;
       addToast({
         title: "Error",
-        description: err.message || "Action failed.",
+        description: errObj.message || "Action failed.",
         type: "error",
       });
     } finally {
@@ -294,9 +319,6 @@ export function SellerDetailsModal({
   ).length;
   const deliveredCount = incomingOrders.filter(
     (o) => normalizeInternalStatus(o.fulfillment_status) === "DELIVERED"
-  ).length;
-  const cancelledCount = incomingOrders.filter(
-    (o) => normalizeInternalStatus(o.fulfillment_status) === "CANCELLED"
   ).length;
 
   return (
@@ -607,6 +629,13 @@ export function SellerDetailsModal({
               >
                 Suspend Seller
               </button>
+            ) : seller?.verification_status === "suspended" ? (
+              <button
+                onClick={() => handleActionClick("unsuspend")}
+                className="flex items-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-semibold transition-colors"
+              >
+                Unsuspend / Reactivate Seller
+              </button>
             ) : null}
           </div>
 
@@ -628,6 +657,8 @@ export function SellerDetailsModal({
               ? "Reject Seller"
               : dialogAction === "suspend"
               ? "Suspend Seller"
+              : dialogAction === "unsuspend"
+              ? "Unsuspend / Reactivate Seller"
               : "Return for Correction"
           }
         >
@@ -635,14 +666,14 @@ export function SellerDetailsModal({
             <div className="flex items-start gap-4 mb-6">
               <div
                 className={`p-3 rounded-full ${
-                  dialogAction === "approve"
+                  dialogAction === "approve" || dialogAction === "unsuspend"
                     ? "bg-green-100 text-green-600"
-                    : dialogAction === "reject"
+                    : dialogAction === "reject" || dialogAction === "suspend"
                     ? "bg-red-100 text-red-600"
                     : "bg-purple-100 text-purple-600"
                 }`}
               >
-                {dialogAction === "approve" ? (
+                {dialogAction === "approve" || dialogAction === "unsuspend" ? (
                   <CheckCircle className="w-6 h-6" />
                 ) : (
                   <AlertCircle className="w-6 h-6" />
@@ -650,7 +681,7 @@ export function SellerDetailsModal({
               </div>
               <div className="flex-1">
                 <p className="text-gray-600 text-sm mt-1">
-                  Are you sure you want to {dialogAction.replace(/_/g, " ")} the seller{" "}
+                  Are you sure you want to {dialogAction === "unsuspend" ? "unsuspend and reactivate" : dialogAction.replace(/_/g, " ")} the seller{" "}
                   <strong>{seller.business_name || seller.contact_name}</strong>?
                 </p>
 
@@ -678,9 +709,9 @@ export function SellerDetailsModal({
               <Button
                 variant="primary"
                 className={
-                  dialogAction === "approve"
+                  dialogAction === "approve" || dialogAction === "unsuspend"
                     ? "bg-green-600 hover:bg-green-700"
-                    : dialogAction === "reject"
+                    : dialogAction === "reject" || dialogAction === "suspend"
                     ? "bg-red-600 hover:bg-red-700"
                     : "bg-purple-600 hover:bg-purple-700"
                 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib/context/AuthContext";
@@ -18,15 +18,7 @@ import {
   CreditCard,
   Banknote,
   Navigation,
-  ExternalLink,
-  AlertTriangle,
   Info,
-  Building2,
-  PhoneCall,
-  User,
-  Mail,
-  Home,
-  Briefcase,
   MapPinOff,
   Compass,
   Tag,
@@ -35,7 +27,6 @@ import {
   X,
   Sparkles,
   Zap,
-  Percent,
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -69,6 +60,42 @@ interface GeocodingSearchResult {
   lon: string;
 }
 
+interface AvailableCouponItem {
+  id: string;
+  code: string;
+  type: string;
+  value: number;
+  min_order_value?: number;
+  min_order_amount?: number;
+  max_discount?: number;
+  description?: string;
+  reason?: string;
+  savings?: number;
+  displayBadge?: string;
+  [key: string]: unknown;
+}
+
+interface ProductTaxDeliveryData {
+  id: string;
+  tax_rate?: number | null;
+  delivery_fee?: number | null;
+  category_id?: string | null;
+  categories?: { tax_rate?: number | null } | { tax_rate?: number | null }[] | null;
+}
+
+interface CashfreeCheckoutOptions {
+  paymentSessionId: string;
+  redirectTarget?: "_self" | "_modal" | "_blank";
+}
+
+interface CashfreeInstance {
+  checkout: (options: CashfreeCheckoutOptions) => Promise<{ error?: { message?: string; code?: string } }>;
+}
+
+interface WindowWithCashfree extends Window {
+  Cashfree?: (config: { mode: "sandbox" | "production" }) => CashfreeInstance;
+}
+
 const DEFAULT_CITIES: CityRule[] = [
   { name: "TARKESWAR", delivery_fee: 40 },
   { name: "LOKNATH", delivery_fee: 40 },
@@ -88,7 +115,9 @@ export default function CheckoutPage() {
   const { items, buyNowItem, clearCart, clearBuyNowItem } = useCart();
   const searchParams = useSearchParams();
   const isBuyNow = searchParams.get("mode") === "buy_now" || Boolean(buyNowItem);
-  const checkoutItems = isBuyNow && buyNowItem ? [buyNowItem] : items;
+  const checkoutItems = useMemo(() => {
+    return isBuyNow && buyNowItem ? [buyNowItem] : items;
+  }, [isBuyNow, buyNowItem, items]);
 
   const [currentStep, setCurrentStep] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -96,8 +125,30 @@ export default function CheckoutPage() {
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
 
-  // Idempotency Single Order Guard
+  // Idempotency Single Order Guard & Attempt ID Tracking
   const isSubmittingRef = useRef(false);
+  const checkoutAttemptIdRef = useRef<string>("");
+  useEffect(() => {
+    if (!checkoutAttemptIdRef.current) {
+      checkoutAttemptIdRef.current =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `chk_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    }
+  }, []);
+
+  // When checkout items change, generate a fresh attempt ID for the new item set
+  const prevItemsHashRef = useRef("");
+  useEffect(() => {
+    const currentHash = checkoutItems.map((i) => `${i.id}_${i.quantity}`).join(",");
+    if (prevItemsHashRef.current && prevItemsHashRef.current !== currentHash) {
+      checkoutAttemptIdRef.current =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `chk_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    }
+    prevItemsHashRef.current = currentHash;
+  }, [checkoutItems]);
 
   // Admin-controlled Rules State
   const [cityRules, setCityRules] = useState<CityRule[]>(DEFAULT_CITIES);
@@ -119,9 +170,9 @@ export default function CheckoutPage() {
   const [couponMessage, setCouponMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   // Available Coupons State (Requirement 3)
-  const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
-  const [otherCoupons, setOtherCoupons] = useState<any[]>([]);
-  const [isLoadingAvailableCoupons, setIsLoadingAvailableCoupons] = useState(false);
+  const [availableCoupons, setAvailableCoupons] = useState<AvailableCouponItem[]>([]);
+  const [otherCoupons, setOtherCoupons] = useState<AvailableCouponItem[]>([]);
+  const [, setIsLoadingAvailableCoupons] = useState(false);
 
   // Geocoding Search State
   const [locationSearch, setLocationSearch] = useState("");
@@ -180,7 +231,7 @@ export default function CheckoutPage() {
           .order("name", { ascending: true });
 
         if (citiesData && citiesData.length > 0) {
-          const rules: CityRule[] = citiesData.map((c: any) => ({
+          const rules: CityRule[] = citiesData.map((c: { name: string; delivery_fee?: number | string | null }) => ({
             name: c.name,
             delivery_fee: Number(c.delivery_fee ?? 40),
           }));
@@ -201,7 +252,7 @@ export default function CheckoutPage() {
           const taxMap = new Map<string, number>();
           const delivMap = new Map<string, number>();
 
-          (prodsData || []).forEach((p: any) => {
+          ((prodsData as ProductTaxDeliveryData[]) || []).forEach((p) => {
             const catObj = Array.isArray(p.categories) ? p.categories[0] : p.categories;
             const effectiveTax =
               p.tax_rate !== null && p.tax_rate !== undefined
@@ -437,7 +488,7 @@ export default function CheckoutPage() {
         setCouponMessage({ text: data.message || "Invalid coupon code.", type: "error" });
         addToast({ title: "Coupon Error", description: data.message || "Invalid coupon code.", type: "error" });
       }
-    } catch (err: any) {
+    } catch {
       setCouponMessage({ text: "Failed to validate coupon code.", type: "error" });
     } finally {
       setIsValidatingCoupon(false);
@@ -669,6 +720,33 @@ export default function CheckoutPage() {
     await reverseGeocode(lat, lng);
   };
 
+  // Helper to dynamically load the official Cashfree Web Checkout SDK v3
+  const loadCashfreeSdk = (mode: "sandbox" | "production" = "sandbox"): Promise<CashfreeInstance | null> => {
+    return new Promise((resolve) => {
+      if (typeof window === "undefined") {
+        resolve(null);
+        return;
+      }
+      const win = window as unknown as WindowWithCashfree;
+      if (win.Cashfree) {
+        resolve(win.Cashfree({ mode }));
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+      script.async = true;
+      script.onload = () => {
+        if (win.Cashfree) {
+          resolve(win.Cashfree({ mode }));
+        } else {
+          resolve(null);
+        }
+      };
+      script.onerror = () => resolve(null);
+      document.body.appendChild(script);
+    });
+  };
+
   // Single Order Creation Handler via Secure Server API (Phase 8 & 9)
   const handlePlaceOrder = async () => {
     if (isSubmittingRef.current || isProcessing) return;
@@ -711,39 +789,190 @@ export default function CheckoutPage() {
         email: form.email.trim() || user?.email,
       };
 
-      const response = await fetch("/api/orders/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user?.id,
-          email: form.email.trim() || user?.email,
-          shippingAddress,
-          paymentMethod: form.paymentMethod,
-          shippingMethod: `${selectedCityRule.name} Delivery`,
-          shippingCost: calculatedDeliveryFee,
-          cityRuleName: selectedCityRule.name,
-          items: checkoutItems,
-          couponCode: appliedCoupon ? appliedCoupon.code : null,
-        }),
-      });
+      const attemptId =
+        checkoutAttemptIdRef.current ||
+        (typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `chk_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`);
+      checkoutAttemptIdRef.current = attemptId;
 
-      const result = await response.json();
+      if (form.paymentMethod === "COD") {
+        const response = await fetch("/api/orders/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: user?.id,
+            email: form.email.trim() || user?.email,
+            shippingAddress,
+            paymentMethod: "COD",
+            paymentStatus: "pending",
+            shippingMethod: `${selectedCityRule.name} Delivery`,
+            shippingCost: calculatedDeliveryFee,
+            cityRuleName: selectedCityRule.name,
+            items: checkoutItems,
+            couponCode: appliedCoupon ? appliedCoupon.code : null,
+            idempotencyKey: attemptId,
+          }),
+        });
 
-      if (!result.success) {
-        throw new Error(result.message || "Failed to process order.");
-      }
+        const result = await response.json();
 
-      if (isBuyNow) {
-        clearBuyNowItem();
+        if (!result.success) {
+          throw new Error(result.message || "Failed to process order.");
+        }
+
+        if (isBuyNow) {
+          clearBuyNowItem();
+        } else {
+          clearCart();
+        }
+
+        // Generate a fresh attempt ID for any subsequent orders in this session
+        checkoutAttemptIdRef.current =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `chk_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+
+        router.push(`/checkout/success?order=${result.order_number}`);
       } else {
-        clearCart();
-      }
+        // ONLINE PAYMENT via Cashfree Payment Gateway
+        // 1. Authoritative Internal Order Creation (status: pending, atomic stock reservation)
+        const orderResponse = await fetch("/api/orders/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: user?.id,
+            email: form.email.trim() || user?.email,
+            shippingAddress,
+            paymentMethod: "ONLINE",
+            paymentStatus: "pending",
+            shippingMethod: `${selectedCityRule.name} Delivery`,
+            shippingCost: calculatedDeliveryFee,
+            cityRuleName: selectedCityRule.name,
+            items: checkoutItems,
+            couponCode: appliedCoupon ? appliedCoupon.code : null,
+            idempotencyKey: attemptId,
+          }),
+        });
 
-      router.push(`/checkout/success?order=${result.order_number}`);
-    } catch (err: any) {
+        const internalOrderResult = await orderResponse.json();
+        if (!internalOrderResult.success) {
+          throw new Error(internalOrderResult.message || "Failed to initialize internal order.");
+        }
+
+        // 2. Authoritative Cashfree Payment Order Creation
+        const createCfOrderRes = await fetch("/api/payment/cashfree/create-order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: checkoutItems,
+            couponCode: appliedCoupon ? appliedCoupon.code : null,
+            shippingCost: calculatedDeliveryFee,
+            idempotencyKey: attemptId,
+            orderId: internalOrderResult.order?.id,
+            orderNumber: internalOrderResult.order_number,
+            customerDetails: {
+              customerId: user?.id,
+              name: form.fullName.trim(),
+              email: form.email.trim() || user?.email,
+              phone: form.phone.trim(),
+            },
+          }),
+        });
+
+        const cfOrderData = await createCfOrderRes.json();
+        if (!cfOrderData.success || !cfOrderData.paymentSessionId) {
+          throw new Error(cfOrderData.message || "Failed to initialize Cashfree payment session.");
+        }
+
+        // 3. Load Cashfree Web SDK v3
+        const mode = cfOrderData.environment === "production" ? "production" : "sandbox";
+        const cashfree = await loadCashfreeSdk(mode);
+        if (!cashfree) {
+          throw new Error("Unable to load Cashfree payment gateway. Please check your internet connection.");
+        }
+
+        // 4. Launch Cashfree Web Checkout Modal
+        cashfree
+          .checkout({
+            paymentSessionId: cfOrderData.paymentSessionId,
+            redirectTarget: "_modal",
+          })
+          .then(async (checkoutResult: { error?: { message?: string; code?: string } } | undefined) => {
+            if (checkoutResult?.error) {
+              console.warn("Cashfree checkout notice:", checkoutResult.error);
+              setIsProcessing(false);
+              isSubmittingRef.current = false;
+              addToast({
+                title: "Payment Window Closed",
+                description:
+                  checkoutResult.error?.message ||
+                  "The payment session was closed without completing. You can retry anytime.",
+                type: "info",
+              });
+              return;
+            }
+
+            // 5. Authoritative Server Verification of Payment Status
+            try {
+              setIsProcessing(true);
+              const verifyRes = await fetch("/api/payment/cashfree/verify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  cashfreeOrderId: cfOrderData.orderId,
+                  orderPayload: {
+                    idempotencyKey: attemptId,
+                    orderId: internalOrderResult.order?.id,
+                    orderNumber: internalOrderResult.order_number,
+                  },
+                }),
+              });
+
+              const verifyResult = await verifyRes.json();
+              if (!verifyResult.success) {
+                throw new Error(verifyResult.message || "Payment verification incomplete.");
+              }
+
+              if (isBuyNow) {
+                clearBuyNowItem();
+              } else {
+                clearCart();
+              }
+
+              // Fresh attempt ID for future orders
+              checkoutAttemptIdRef.current =
+                typeof crypto !== "undefined" && crypto.randomUUID
+                  ? crypto.randomUUID()
+                  : `chk_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+
+              addToast({
+                title: "Payment Confirmed!",
+                description: `Order ${verifyResult.order_number || internalOrderResult.order_number} confirmed successfully!`,
+                type: "success",
+              });
+
+              router.push(`/checkout/success?order=${verifyResult.order_number || internalOrderResult.order_number}`);
+            } catch (verifyErr: unknown) {
+              const verifyMsg = verifyErr instanceof Error ? verifyErr.message : undefined;
+              console.warn("Cashfree verification response:", verifyErr);
+              setIsProcessing(false);
+              isSubmittingRef.current = false;
+              addToast({
+                title: "Payment Status Notice",
+                description:
+                  verifyMsg ||
+                  "Payment could not be verified immediately. If money was deducted, our team will verify and update your order.",
+                type: "info",
+              });
+            }
+          });
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : undefined;
       addToast({
         title: "Checkout Error",
-        description: err.message || "Failed to process order. Please try again.",
+        description: errMsg || "Failed to process order. Please try again.",
         type: "error",
       });
       setIsProcessing(false);
@@ -903,6 +1132,20 @@ export default function CheckoutPage() {
                                   <span>{searchNotice}</span>
                                 </div>
                               </div>
+                              {suggestedAreas.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-1.5 pt-1">
+                                  {suggestedAreas.map((area) => (
+                                    <button
+                                      key={area}
+                                      type="button"
+                                      onClick={() => setLocationSearch(area)}
+                                      className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      {area}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           ) : null}
                         </div>
@@ -1227,7 +1470,11 @@ export default function CheckoutPage() {
                       disabled={isProcessing}
                       className="w-full md:w-auto min-w-[220px]"
                     >
-                      Place Order - {formatCurrency(grandTotal)}
+                      {isProcessing
+                        ? "Processing..."
+                        : form.paymentMethod === "ONLINE"
+                        ? `Pay Now - ${formatCurrency(grandTotal)}`
+                        : `Place Order - ${formatCurrency(grandTotal)}`}
                     </Button>
                   </div>
                 </motion.div>
@@ -1357,34 +1604,39 @@ export default function CheckoutPage() {
                   <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
                     Available Coupons
                   </span>
-                  {availableCoupons.map((c) => (
-                    <div
-                      key={c.id}
-                      className="p-3 bg-white border border-blue-200 rounded-xl flex items-center justify-between shadow-sm hover:border-blue-400 transition-all"
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <Tag className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono font-bold text-slate-900 text-xs">{c.code}</span>
-                            <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
-                              {c.displayBadge}
+                  {availableCoupons.map((c) => {
+                    const minAmount = Number(c.min_order_amount ?? c.min_order_value ?? 0);
+                    return (
+                      <div
+                        key={c.id}
+                        className="p-3 bg-white border border-blue-200 rounded-xl flex items-center justify-between shadow-sm hover:border-blue-400 transition-all"
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <Tag className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-slate-900 text-xs">{c.code}</span>
+                              {Boolean(c.displayBadge) && (
+                                <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+                                  {String(c.displayBadge)}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] text-slate-500 block mt-0.5 font-medium">
+                              {minAmount > 0 ? `Min order ${formatCurrency(minAmount)}` : "Save on your order"}
                             </span>
                           </div>
-                          <span className="text-[11px] text-slate-500 block mt-0.5 font-medium">
-                            {c.min_order_amount > 0 ? `Min order ${formatCurrency(c.min_order_amount)}` : "Save on your order"}
-                          </span>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyCoupon(c.code)}
+                          className="px-3 py-1.5 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white rounded-lg text-xs font-bold transition-all shrink-0 border border-blue-200"
+                        >
+                          APPLY
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleApplyCoupon(c.code)}
-                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white rounded-lg text-xs font-bold transition-all shrink-0 border border-blue-200"
-                      >
-                        APPLY
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -1404,9 +1656,11 @@ export default function CheckoutPage() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-mono font-bold text-slate-700 text-xs">{c.code}</span>
-                            <span className="text-[10px] font-semibold bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
-                              {c.displayBadge}
-                            </span>
+                            {Boolean(c.displayBadge) && (
+                              <span className="text-[10px] font-semibold bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+                                {String(c.displayBadge)}
+                              </span>
+                            )}
                           </div>
                           <span className="text-[10px] text-amber-700 font-medium block mt-0.5">
                             {c.reason || "Not applicable to this order"}

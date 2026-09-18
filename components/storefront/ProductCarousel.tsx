@@ -21,6 +21,11 @@ export function ProductCarousel({
   const [isPaused, setIsPaused] = useState(false);
   const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Mouse Drag state
+  const [isDragging, setIsDragging] = useState(false);
+  const [startX, setStartX] = useState(0);
+  const [scrollLeftPos, setScrollLeftPos] = useState(0);
+
   // Check scroll positions to show/hide arrow buttons
   const checkScroll = useCallback(() => {
     const el = containerRef.current;
@@ -65,7 +70,7 @@ export function ProductCarousel({
 
   // Auto-scroll loop every 5s if not paused
   useEffect(() => {
-    if (isPaused) return;
+    if (isPaused || isDragging) return;
 
     const interval = setInterval(() => {
       const el = containerRef.current;
@@ -81,15 +86,44 @@ export function ProductCarousel({
     }, autoScrollInterval);
 
     return () => clearInterval(interval);
-  }, [isPaused, autoScrollInterval]);
+  }, [isPaused, isDragging, autoScrollInterval]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const el = containerRef.current;
+    if (!el) return;
+    setIsDragging(true);
+    setStartX(e.pageX - el.offsetLeft);
+    setScrollLeftPos(el.scrollLeft);
+    handleUserInteraction();
+  };
+
+  const handleMouseLeave = () => {
+    setIsDragging(false);
+    setIsPaused(false);
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const x = e.pageX - el.offsetLeft;
+    const walk = (x - startX) * 1.5;
+    el.scrollLeft = scrollLeftPos - walk;
+  };
 
   return (
     <div
-      className={cn("relative group w-full max-w-full overflow-hidden", className)}
+      className={cn("relative group w-full max-w-full overflow-hidden flex flex-col justify-center", className)}
       onMouseEnter={() => setIsPaused(true)}
-      onMouseLeave={() => setIsPaused(false)}
+      onMouseLeave={handleMouseLeave}
       onTouchStart={handleUserInteraction}
-      onMouseDown={handleUserInteraction}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onMouseMove={handleMouseMove}
     >
       {/* Left Navigation Arrow */}
       {canScrollLeft && (
@@ -116,7 +150,10 @@ export function ProductCarousel({
       {/* Scrollable Container */}
       <div
         ref={containerRef}
-        className="flex overflow-x-auto no-scrollbar scroll-smooth gap-4 py-2 px-1 snap-x w-full"
+        className={cn(
+          "flex overflow-x-auto overflow-y-hidden no-scrollbar scroll-smooth gap-4 py-2 px-1 snap-x w-full touch-pan-y select-none",
+          isDragging ? "cursor-grabbing scroll-auto" : "cursor-grab"
+        )}
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
         {children}

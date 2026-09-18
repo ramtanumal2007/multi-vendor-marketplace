@@ -14,7 +14,6 @@ import {
   RefreshCw, 
   Zap, 
   TrendingUp, 
-  Store as StoreIcon, 
   Sparkles,
   Tag,
   Clock,
@@ -23,7 +22,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ProductCard } from "@/components/ui/ProductCard";
-import { TopCategoryNav } from "@/components/storefront/TopCategoryNav";
 import { ProductCarousel } from "@/components/storefront/ProductCarousel";
 import { createClient } from "@/lib/supabase";
 import { useToast } from "@/components/ui/Toast";
@@ -256,11 +254,8 @@ export default function Homepage() {
   return (
     <div className="flex-1 w-full pb-24 bg-background overflow-x-hidden">
       
-      {/* 2. TOP CATEGORY NAVIGATION */}
-      <TopCategoryNav />
-
-      {/* 3. MAIN HERO BANNER */}
-      <section className="px-4 md:px-12 max-w-[1440px] mx-auto mt-4 md:mt-6">
+      {/* MAIN HERO BANNER */}
+      <section className="px-4 md:px-12 max-w-[1440px] mx-auto mt-3 md:mt-4">
         <div className="relative h-[280px] sm:h-[360px] md:h-[480px] w-full rounded-3xl overflow-hidden shadow-lg border border-border/40 group">
           {heroSlides.length > 0 ? (
             <AnimatePresence mode="wait">
@@ -355,49 +350,53 @@ export default function Homepage() {
         </div>
       </section>
 
-      {/* 4. PREMIUM SHOP BY CATEGORY (Circular Image Cards) */}
-      <section className="py-10 px-4 md:px-12 max-w-[1440px] mx-auto">
-        <div className="flex items-center justify-between mb-6">
+      {/* 4. PREMIUM SHOP BY CATEGORY (Blinkit-Inspired Light Style) */}
+      <section className="mt-3 md:mt-4 pb-4 md:pb-6 px-4 md:px-12 max-w-[1440px] mx-auto">
+        <div className="flex items-end justify-between gap-4 mb-3 md:mb-3.5">
           <div>
-            <h2 className="text-xl md:text-3xl font-bold flex items-center gap-2 text-foreground">
-              <StoreIcon className="w-6 h-6 text-accent" /> Shop by Category
+            <h2 className="font-sans text-xl sm:text-2xl md:text-2xl font-bold tracking-tight text-foreground leading-tight">
+              Shop by Category
             </h2>
-            <p className="text-xs md:text-sm text-foreground-secondary mt-1">Explore our wide selection of top verified marketplace departments</p>
+            <p className="font-sans text-xs md:text-sm text-foreground-secondary mt-0.5">
+              Explore our wide selection of top verified marketplace departments
+            </p>
           </div>
-          <Link href="/products" className="text-xs md:text-sm font-semibold text-accent hover:underline flex items-center gap-1">
-            See All Categories <ChevronRight className="w-4 h-4" />
+          <Link 
+            href="/products" 
+            className="shrink-0 font-sans text-xs md:text-sm font-semibold text-accent hover:text-accent/80 transition-colors flex items-center gap-1 group pb-0.5 outline-none focus:outline-none focus-visible:underline"
+          >
+            See All Categories <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
         </div>
 
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-6 gap-4 md:gap-6">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 sm:gap-4 md:gap-6 justify-items-center">
           {isLoading ? (
             Array(6).fill(0).map((_, i) => (
-              <div key={i} className="flex flex-col items-center gap-3">
-                <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                <div className="w-16 h-3 bg-slate-200 dark:bg-slate-800 rounded animate-pulse" />
+              <div key={i} className="flex flex-col items-center w-full max-w-[110px]">
+                <div className="w-[72px] h-[72px] sm:w-[84px] sm:h-[84px] md:w-[96px] md:h-[96px] rounded-full bg-slate-100 dark:bg-slate-800 animate-pulse aspect-square border border-slate-200/60 dark:border-slate-700/60" />
+                <div className="w-14 sm:w-16 h-3.5 bg-slate-200 dark:bg-slate-800 rounded animate-pulse mt-2" />
               </div>
             ))
           ) : (
-            categories.slice(0, 12).map((cat) => {
+            categories.slice(0, 6).map((cat) => {
               const catImage = cat.image_url || CATEGORY_IMAGE_FALLBACKS[cat.slug] || "https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&q=80";
 
               return (
                 <Link
                   key={cat.id}
                   href={`/categories/${cat.slug}`}
-                  className="group flex flex-col items-center text-center gap-2.5"
+                  className="group flex flex-col items-center text-center w-full max-w-[110px] select-none outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 rounded-2xl"
                 >
-                  <div className="relative w-20 h-20 sm:w-22 sm:h-22 md:w-24 md:h-24 rounded-full p-1 bg-background border-2 border-border/80 group-hover:border-accent shadow-sm group-hover:shadow-md transition-all duration-300 group-hover:scale-105 overflow-hidden">
-                    <div className="relative w-full h-full rounded-full overflow-hidden">
-                      <Image
-                        src={catImage}
-                        alt={cat.name}
-                        fill
-                        className="object-cover group-hover:scale-110 transition-transform duration-500"
-                      />
-                    </div>
+                  <div className="relative w-[72px] h-[72px] sm:w-[84px] sm:h-[84px] md:w-[96px] md:h-[96px] aspect-square rounded-full overflow-hidden bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/70 shadow-xs transition-all duration-200 group-hover:scale-[1.03] group-hover:border-accent group-hover:shadow-sm">
+                    <Image
+                      src={catImage}
+                      alt={cat.name}
+                      fill
+                      sizes="(max-width: 640px) 72px, (max-width: 768px) 84px, 96px"
+                      className="object-cover transition-transform duration-200 group-hover:scale-105"
+                    />
                   </div>
-                  <span className="text-xs md:text-sm font-semibold text-foreground group-hover:text-accent line-clamp-1 transition-colors">
+                  <span className="font-sans text-xs md:text-sm font-semibold text-slate-800 dark:text-slate-200 group-hover:text-accent line-clamp-1 text-center transition-colors max-w-full px-0.5 mt-1.5 md:mt-2">
                     {cat.name}
                   </span>
                 </Link>

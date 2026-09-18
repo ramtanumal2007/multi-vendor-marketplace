@@ -38,7 +38,7 @@ export default function ShippingPolicyPage() {
 
         <h2 className="text-2xl font-serif mt-10 mb-4">Refunds, returns, and exchanges</h2>
         <p className="text-foreground-secondary mb-6 leading-relaxed">
-          Please review our full Return Policy for detailed information on returns and exchanges. If you have any further questions, please don't hesitate to contact us at support@example.com.
+          Please review our full Return Policy for detailed information on returns and exchanges. If you have any further questions, please don&apos;t hesitate to contact us at support@example.com.
         </p>
       </div>
     </div>

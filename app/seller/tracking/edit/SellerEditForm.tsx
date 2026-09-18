@@ -7,7 +7,15 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { Store, User, Mail, Phone, Briefcase } from "lucide-react";
 
-export default function SellerEditForm({ initialData }: { initialData: any }) {
+export interface SellerEditInitialData {
+  business_name?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
+  business_email?: string | null;
+  business_type?: string | null;
+}
+
+export default function SellerEditForm({ initialData }: { initialData: SellerEditInitialData }) {
   const [formData, setFormData] = useState({
     business_name: initialData.business_name || "",
     contact_name: initialData.contact_name || "",
@@ -49,10 +57,11 @@ export default function SellerEditForm({ initialData }: { initialData: any }) {
       // Redirect back to tracking page
       router.push("/seller/tracking");
       router.refresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to resubmit application.";
       addToast({
         title: "Error",
-        description: err.message || "Failed to resubmit application.",
+        description: message,
         type: "error",
       });
     } finally {

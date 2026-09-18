@@ -2,19 +2,66 @@
 
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Package, ShoppingBag, CheckCircle2, Clock, FileText, Download } from "lucide-react";
+import { Package, ShoppingBag, FileText, Download } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { InvoiceModal } from "@/components/checkout/InvoiceModal";
 
+interface OrderRecord {
+  id: string;
+  order_number: string;
+  invoice_number?: string;
+  created_at: string;
+  internal_status?: string;
+  fulfillment_status: string;
+  payment_status: string;
+  payment_method?: string;
+  total: number;
+  subtotal?: number;
+  tax_amount?: number;
+  delivery_charge?: number;
+  tip_amount?: number;
+  coupon_discount?: number;
+  applied_coupon_code?: string;
+  shipping_address?: {
+    first_name?: string;
+    last_name?: string;
+    address1?: string;
+    address2?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    phone?: string;
+  };
+  email?: string;
+  [key: string]: unknown;
+}
+
+interface OrderItemRecord {
+  id: string;
+  title: string;
+  price: number;
+  quantity: number;
+  sku?: string;
+  stores?: { name?: string } | null;
+}
+
+interface CustomerProfileRecord {
+  id: string;
+  customer_id_code?: string;
+  full_name?: string;
+  phone?: string;
+  email?: string;
+}
+
 export default function OrderSuccessPage() {
   const searchParams = useSearchParams();
   const orderNumber = searchParams.get("order") || "ORD-00000";
-  const [orderRecord, setOrderRecord] = useState<any>(null);
-  const [orderItems, setOrderItems] = useState<any[]>([]);
-  const [customerProfile, setCustomerProfile] = useState<any>(null);
+  const [orderRecord, setOrderRecord] = useState<OrderRecord | null>(null);
+  const [orderItems, setOrderItems] = useState<OrderItemRecord[]>([]);
+  const [customerProfile, setCustomerProfile] = useState<CustomerProfileRecord | null>(null);
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
   const [orderInfo, setOrderInfo] = useState<{
@@ -61,7 +108,7 @@ export default function OrderSuccessPage() {
     }
 
     fetchOrderSummary();
-  }, [orderNumber]);
+  }, [orderNumber, supabase]);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[70vh] px-6 text-center py-12">

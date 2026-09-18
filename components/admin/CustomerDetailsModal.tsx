@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, Mail, Phone, Calendar, UserCheck, Package, ShoppingBag, Store, ExternalLink, ShieldAlert, Edit2, Check, AlertCircle } from "lucide-react";
+import { X, Mail, Phone, Calendar, UserCheck, Package, ShoppingBag, Store, ExternalLink, Edit2, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
@@ -45,7 +45,6 @@ export function CustomerDetailsModal({
   isOpen,
   onClose,
   onSelectSeller,
-  onSelectOrder,
 }: CustomerDetailsModalProps) {
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [orders, setOrders] = useState<EnrichedOrder[]>([]);
@@ -99,7 +98,7 @@ export function CustomerDetailsModal({
 
       // Enrich orders with seller store info & item titles
       if (ordersData && ordersData.length > 0) {
-        const orderIds = ordersData.map((o: any) => o.id);
+        const orderIds = ordersData.map((o: { id: string }) => o.id);
         const { data: itemsData } = await supabase
           .from("order_items")
           .select("order_id, title, quantity, store_id, stores(id, name, seller_id)")
@@ -107,7 +106,15 @@ export function CustomerDetailsModal({
 
         const orderStoreMap = new Map<string, { store_name: string; seller_id: string; summary: string }>();
 
-        (itemsData || []).forEach((item: any) => {
+        interface OrderItemWithStore {
+          order_id: string;
+          title: string;
+          quantity: number;
+          store_id?: string;
+          stores?: { id?: string; name?: string; seller_id?: string } | Array<{ id?: string; name?: string; seller_id?: string }> | null;
+        }
+
+        ((itemsData || []) as OrderItemWithStore[]).forEach((item) => {
           const store = Array.isArray(item.stores) ? item.stores[0] : item.stores;
           const current = orderStoreMap.get(item.order_id) || {
             store_name: store?.name || "Multiple / Store",
@@ -125,7 +132,16 @@ export function CustomerDetailsModal({
           });
         });
 
-        const enriched: EnrichedOrder[] = ordersData.map((ord: any) => {
+        interface RawOrderRow {
+          id: string;
+          order_number: string;
+          total: number;
+          payment_status: string;
+          fulfillment_status: string;
+          created_at: string;
+        }
+
+        const enriched: EnrichedOrder[] = (ordersData as RawOrderRow[]).map((ord) => {
           const info = orderStoreMap.get(ord.id);
           return {
             ...ord,
@@ -139,10 +155,11 @@ export function CustomerDetailsModal({
       } else {
         setOrders([]);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errObj = err as Error;
       addToast({
         title: "Error",
-        description: err.message || "Failed to load customer profile.",
+        description: errObj.message || "Failed to load customer profile.",
         type: "error",
       });
     } finally {
@@ -179,10 +196,11 @@ export function CustomerDetailsModal({
         description: "Customer profile updated successfully.",
         type: "success",
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errObj = err as Error;
       addToast({
         title: "Update Failed",
-        description: err.message || "Could not update customer.",
+        description: errObj.message || "Could not update customer.",
         type: "error",
       });
     } finally {

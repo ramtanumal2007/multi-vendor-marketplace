@@ -148,7 +148,7 @@ export default function EditProductForm({ product, categories }: { product: Prod
       const activeUrls = new Set(images.map((item) => item.url));
       const pathsToRemove: string[] = [];
 
-      (currentImgs || []).forEach((row: any) => {
+      (currentImgs || []).forEach((row: { image_url: string }) => {
         if (!activeUrls.has(row.image_url)) {
           const storagePath = extractStoragePath(row.image_url);
           if (storagePath) pathsToRemove.push(storagePath);

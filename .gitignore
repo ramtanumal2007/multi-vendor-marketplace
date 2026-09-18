@@ -34,3 +34,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local development / temporary files
+lint_all.txt
+lint_output.txt
+lint_remaining.txt
+supabase/.temp/

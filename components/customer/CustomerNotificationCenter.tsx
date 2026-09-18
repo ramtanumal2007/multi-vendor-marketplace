@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Bell, Check, ShoppingBag, Truck, CheckCircle2, Tag, Info, ExternalLink, X, CheckCheck, Sparkles } from "lucide-react";
+import { Bell, ShoppingBag, Truck, CheckCircle2, Tag, Info, ExternalLink, X, CheckCheck, Sparkles } from "lucide-react";
 import { useCustomerNotifications, CustomerNotification } from "@/lib/hooks/useCustomerNotifications";
 import Link from "next/link";
 

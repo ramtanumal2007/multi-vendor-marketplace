@@ -14,14 +14,14 @@ export default function StorefrontLayout({
   return (
     <AuthProvider>
       <CartProvider>
-        <div className="relative min-h-screen flex flex-col pt-[60px]">
-        <Header />
-        <main className="flex-1 flex flex-col relative overflow-x-hidden">{children}</main>
-        <Footer />
-        <CartDrawer />
-        <ToastContainer />
-      </div>
-    </CartProvider>
+        <div className="relative min-h-screen flex flex-col pt-[106px] md:pt-[152px]">
+          <Header />
+          <main className="flex-1 flex flex-col relative overflow-x-hidden">{children}</main>
+          <Footer />
+          <CartDrawer />
+          <ToastContainer />
+        </div>
+      </CartProvider>
     </AuthProvider>
   );
 }

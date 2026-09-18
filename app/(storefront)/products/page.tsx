@@ -14,34 +14,46 @@ import Image from "next/image";
 import { formatCurrency } from "@/lib/utils";
 import { createClient } from "@/lib/supabase";
 
+interface StorefrontProductItem {
+  id: string;
+  title: string;
+  slug?: string;
+  price: number;
+  sale_price?: number | null;
+  product_images?: Array<{ id?: string; image_url: string }>;
+  rating?: number;
+  category_id?: string | null;
+  status: string;
+  description?: string | null;
+  sku?: string | null;
+}
+
+interface StorefrontCategoryItem {
+  id: string;
+  name: string;
+  slug?: string;
+}
+
 export default function ProductListingPage() {
-  const [products, setProducts] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [products, setProducts] = useState<StorefrontProductItem[]>([]);
+  const [categories, setCategories] = useState<StorefrontCategoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [sortBy, setSortBy] = useState("recommended");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [quickViewProduct, setQuickViewProduct] = useState<any>(null);
+  const [quickViewProduct, setQuickViewProduct] = useState<StorefrontProductItem | null>(null);
   
   const { addItem } = useCart();
   const { addToast } = useToast();
   const supabase = createClient();
 
-  useEffect(() => {
-    fetchCategories();
-  }, []);
-
-  useEffect(() => {
-    fetchProducts();
-  }, [sortBy, selectedCategory]);
-
-  const fetchCategories = async () => {
+  const fetchCategories = React.useCallback(async () => {
     const { data } = await supabase.from("categories").select("*");
     if (data) setCategories(data);
-  };
+  }, [supabase]);
 
-  const fetchProducts = async () => {
+  const fetchProducts = React.useCallback(async () => {
     setIsLoading(true);
     let query = supabase.from("products").select("*, product_images(*)").eq("status", "active");
     
@@ -53,24 +65,32 @@ export default function ProductListingPage() {
     else if (sortBy === "price_desc") query = query.order("price", { ascending: false });
     else if (sortBy === "newest") query = query.order("created_at", { ascending: false });
 
-    const { data, error } = await query;
-    if (data) setProducts(data);
+    const { data } = await query;
+    if (data) setProducts(data as StorefrontProductItem[]);
     setIsLoading(false);
-  };
+  }, [selectedCategory, sortBy, supabase]);
 
-  const handleQuickAdd = (product: any) => {
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  const handleQuickAdd = (product: StorefrontProductItem) => {
     addItem({
       id: product.id,
       productId: product.id,
       title: product.title,
       price: product.price,
-      image: product.product_images[0]?.image_url,
+      image: product.product_images?.[0]?.image_url || "",
     });
     addToast({ title: "Added to cart", type: "success" });
   };
 
   return (
-    <div className="mx-auto max-w-[1440px] px-6 md:px-16 py-8 md:py-12 w-full pt-[80px] md:pt-[100px]">
+    <div className="mx-auto max-w-[1440px] px-6 md:px-16 py-8 md:py-12 w-full">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8 border-b border-border pb-6">
         <div>
@@ -172,7 +192,7 @@ export default function ProductListingPage() {
       <Modal isOpen={!!quickViewProduct} onClose={() => setQuickViewProduct(null)} title="Quick View">
         {quickViewProduct && (() => {
           const hasDiscount = Boolean(quickViewProduct.sale_price && quickViewProduct.sale_price > 0 && quickViewProduct.sale_price < quickViewProduct.price);
-          const effectivePrice = hasDiscount ? quickViewProduct.sale_price : quickViewProduct.price;
+          const effectivePrice = Number(hasDiscount ? quickViewProduct.sale_price : quickViewProduct.price) || quickViewProduct.price;
 
           return (
             <div className="flex flex-col md:flex-row gap-6 mt-4">

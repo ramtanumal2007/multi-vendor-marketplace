@@ -20,11 +20,79 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/Button";
 import { InvoiceModal } from "@/components/checkout/InvoiceModal";
 
+interface StorefrontOrderDetail {
+  id: string;
+  order_number: string;
+  invoice_number?: string;
+  created_at: string;
+  internal_status?: string;
+  fulfillment_status: string;
+  payment_status: string;
+  payment_method?: string;
+  total: number;
+  subtotal?: number;
+  tax_amount?: number;
+  delivery_charge?: number;
+  tip_amount?: number;
+  coupon_discount?: number;
+  applied_coupon_code?: string;
+  shipping_method?: string;
+  shipping_cost?: number;
+  shipping_address?: {
+    first_name?: string;
+    last_name?: string;
+    address_line1?: string;
+    address_line2?: string;
+    address1?: string;
+    address2?: string;
+    landmark?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    country?: string;
+    phone?: string;
+    [key: string]: unknown;
+  };
+  email?: string;
+  [key: string]: unknown;
+}
+
+interface StorefrontOrderItem {
+  id: string;
+  order_id: string;
+  order_item_code?: string;
+  title: string;
+  sku?: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  stores?: { name?: string } | { name?: string }[];
+}
+
+interface StorefrontTimeline {
+  id: string;
+  status: string;
+  note?: string;
+  created_at: string;
+  profiles?: {
+    role?: string;
+    full_name?: string;
+  };
+}
+
+interface CustomerProfileData {
+  id: string;
+  customer_id_code?: string;
+  full_name?: string;
+  phone?: string;
+  email?: string;
+}
+
 export default function CustomerOrderDetailsPage({ params }: { params: { id: string } }) {
-  const [order, setOrder] = useState<any>(null);
-  const [items, setItems] = useState<any[]>([]);
-  const [timeline, setTimeline] = useState<any[]>([]);
-  const [customerProfile, setCustomerProfile] = useState<any>(null);
+  const [order, setOrder] = useState<StorefrontOrderDetail | null>(null);
+  const [items, setItems] = useState<StorefrontOrderItem[]>([]);
+  const [timeline, setTimeline] = useState<StorefrontTimeline[]>([]);
+  const [customerProfile, setCustomerProfile] = useState<CustomerProfileData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
@@ -32,47 +100,7 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
   const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push("/login");
-      return;
-    }
-
-    if (user) {
-      fetchOrderDetails();
-
-      // Setup Realtime Subscription
-      const channel = supabase
-        .channel(`order_updates_${params.id}`)
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "order_timeline", filter: `order_id=eq.${params.id}` },
-          (payload: any) => {
-            setTimeline((prev) => [payload.new, ...prev]);
-          }
-        )
-        .on(
-          "postgres_changes",
-          { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${params.id}` },
-          (payload: any) => {
-            setOrder(payload.new);
-          }
-        )
-        .subscribe();
-
-      // Polling fallback
-      const interval = setInterval(() => {
-        fetchOrderDetails(false);
-      }, 10000);
-
-      return () => {
-        supabase.removeChannel(channel);
-        clearInterval(interval);
-      };
-    }
-  }, [params.id, user, authLoading]);
-
-  async function fetchOrderDetails(showLoading = true) {
+  const fetchOrderDetails = React.useCallback(async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
 
     try {
@@ -116,7 +144,47 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
     } finally {
       if (showLoading) setIsLoading(false);
     }
-  }
+  }, [params.id, user, supabase]);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/login");
+      return;
+    }
+
+    if (user) {
+      fetchOrderDetails();
+
+      // Setup Realtime Subscription
+      const channel = supabase
+        .channel(`order_updates_${params.id}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "order_timeline", filter: `order_id=eq.${params.id}` },
+          (payload: { new: StorefrontTimeline }) => {
+            setTimeline((prev) => [payload.new, ...prev]);
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${params.id}` },
+          (payload: { new: StorefrontOrderDetail }) => {
+            setOrder(payload.new);
+          }
+        )
+        .subscribe();
+
+      // Polling fallback
+      const interval = setInterval(() => {
+        fetchOrderDetails(false);
+      }, 10000);
+
+      return () => {
+        supabase.removeChannel(channel);
+        clearInterval(interval);
+      };
+    }
+  }, [params.id, user, authLoading, router, supabase, fetchOrderDetails]);
 
   if (isLoading || authLoading) {
     return (
@@ -144,7 +212,7 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
 
   const activeCustomerStage = mapInternalToCustomerStage(currentInternalStatus);
   const isCancelled = currentInternalStatus === "CANCELLED";
-  const currentStepIndex = CUSTOMER_TRACKING_STAGES.indexOf(activeCustomerStage as any);
+  const currentStepIndex = CUSTOMER_TRACKING_STAGES.indexOf(activeCustomerStage as typeof CUSTOMER_TRACKING_STAGES[number]);
 
   return (
     <div className="mx-auto max-w-[1440px] px-6 md:px-16 py-12 w-full flex flex-col gap-10">
@@ -288,14 +356,11 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
           <div className="border border-border rounded-2xl p-6 bg-background">
             <h2 className="text-xl font-bold mb-6">Order Items</h2>
             <div className="flex flex-col gap-6">
-              {items.map((item) => {
-                const storeObj = Array.isArray(item.stores) ? item.stores[0] : item.stores;
-
-                return (
-                  <div
-                    key={item.id}
-                    className="flex justify-between items-center pb-6 border-b border-border last:border-0 last:pb-0"
-                  >
+              {items.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex justify-between items-center pb-6 border-b border-border last:border-0 last:pb-0"
+                >
                     <div className="flex gap-4 items-center">
                       <div className="w-16 h-16 bg-background-secondary rounded-xl flex items-center justify-center">
                         <Package className="w-6 h-6 text-foreground-secondary" />
@@ -314,8 +379,7 @@ export default function CustomerOrderDetailsPage({ params }: { params: { id: str
                     </div>
                     <div className="font-bold text-base">{formatCurrency(Number(item.line_total))}</div>
                   </div>
-                );
-              })}
+              ))}
             </div>
 
             <div className="mt-8 border-t border-border pt-6 flex flex-col gap-3 text-sm">

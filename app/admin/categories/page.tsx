@@ -13,7 +13,7 @@ function formatDate(dateString: string) {
       day: "numeric",
       year: "numeric",
     }).format(new Date(dateString));
-  } catch (e) {
+  } catch {
     return dateString;
   }
 }
@@ -45,11 +45,7 @@ export default function AdminCategoriesPage() {
   const supabase = createClient();
   const { addToast } = useToast();
 
-  useEffect(() => {
-    fetchCategories();
-  }, []);
-
-  async function fetchCategories() {
+  const fetchCategories = React.useCallback(async () => {
     setIsLoading(true);
     const { data, error } = await supabase
       .from("categories")
@@ -58,14 +54,18 @@ export default function AdminCategoriesPage() {
 
     if (!error && data) {
       setCategories(
-        data.map((c: any) => ({
+        data.map((c: { id: string; name: string; slug: string; description?: string | null; tax_rate?: number | null; created_at: string }) => ({
           ...c,
           tax_rate: c.tax_rate !== null && c.tax_rate !== undefined ? Number(c.tax_rate) : null,
         }))
       );
     }
     setIsLoading(false);
-  }
+  }, [supabase]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
 
   const handleOpenAddModal = () => {
     setEditingCategory(null);
@@ -113,8 +113,9 @@ export default function AdminCategoriesPage() {
 
       setIsModalOpen(false);
       fetchCategories();
-    } catch (err: any) {
-      addToast({ title: "Save Failed", description: err.message || "Could not save category.", type: "error" });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not save category.";
+      addToast({ title: "Save Failed", description: message, type: "error" });
     } finally {
       setIsSubmitting(false);
     }
@@ -128,8 +129,9 @@ export default function AdminCategoriesPage() {
       if (error) throw error;
       addToast({ title: "Category Deleted", description: `${cat.name} removed.`, type: "success" });
       fetchCategories();
-    } catch (err: any) {
-      addToast({ title: "Delete Failed", description: err.message || "Could not delete category.", type: "error" });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not delete category.";
+      addToast({ title: "Delete Failed", description: message, type: "error" });
     }
   };
 

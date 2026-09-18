@@ -116,14 +116,14 @@ export async function POST(req: Request) {
 
     // Fetch product category and store metadata if targeting specific sellers/categories/products
     if (items.length > 0) {
-      const productIds = items.map((i: any) => i.productId).filter(Boolean);
+      const productIds = items.map((i: { productId?: string }) => i.productId).filter(Boolean);
       const { data: prodsData } = await supabase
         .from("products")
         .select("id, category_id, store_id")
         .in("id", productIds);
 
       const prodMetaMap = new Map<string, { category_id?: string; store_id?: string }>(
-        prodsData?.map((p: any) => [p.id, { category_id: p.category_id, store_id: p.store_id }]) || []
+        (prodsData as Array<{ id: string; category_id?: string; store_id?: string }> | null)?.map((p) => [p.id, { category_id: p.category_id, store_id: p.store_id }]) || []
       );
 
       const targetType = coupon.target_type || "all";
@@ -208,9 +208,10 @@ export async function POST(req: Request) {
       },
       discountAmount,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to validate coupon.";
     return NextResponse.json(
-      { valid: false, message: err.message || "Failed to validate coupon." },
+      { valid: false, message },
       { status: 500 }
     );
   }

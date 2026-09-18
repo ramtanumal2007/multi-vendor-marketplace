@@ -2,20 +2,12 @@
 
 export const dynamic = "force-dynamic";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Search,
-  Mail,
-  ShieldAlert,
   Eye,
-  Phone,
-  Calendar,
-  UserCheck,
   Package,
-  ShoppingBag,
   RefreshCw,
-  CheckCircle2,
-  AlertCircle,
   Filter,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
@@ -52,7 +44,7 @@ export default function AdminCustomersPage() {
 
   const supabase = createClient();
 
-  const fetchCustomers = async () => {
+  const fetchCustomers = useCallback(async () => {
     setIsLoading(true);
 
     try {
@@ -75,7 +67,7 @@ export default function AdminCustomersPage() {
           { count: number; spent: number; last_order_at: string | null }
         >();
 
-        (ordersData || []).forEach((ord: any) => {
+        (ordersData || []).forEach((ord: { user_id: string | null; total: number | null; created_at: string }) => {
           if (ord.user_id) {
             const current = orderStatsMap.get(ord.user_id) || {
               count: 0,
@@ -91,7 +83,7 @@ export default function AdminCustomersPage() {
           }
         });
 
-        const enrichedProfiles: CustomerProfile[] = profilesData.map((p: any) => {
+        const enrichedProfiles: CustomerProfile[] = profilesData.map((p: CustomerProfile) => {
           const stats = orderStatsMap.get(p.id) || { count: 0, spent: 0, last_order_at: null };
           return {
             ...p,
@@ -109,11 +101,11 @@ export default function AdminCustomersPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [supabase]);
 
   useEffect(() => {
     fetchCustomers();
-  }, []);
+  }, [fetchCustomers]);
 
   // Filter customers by search term and status
   const filteredCustomers = customers.filter((c) => {

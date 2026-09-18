@@ -9,25 +9,27 @@ import { Button } from "@/components/ui/Button";
 import Link from "next/link";
 import { Heart } from "lucide-react";
 
+interface WishlistProductItem {
+  id: string;
+  title: string;
+  price: number;
+  sale_price?: number | null;
+  category_id?: string;
+  product_images?: Array<{ image_url: string }>;
+  [key: string]: unknown;
+}
+
 export default function WishlistPage() {
-  const [wishlistProducts, setWishlistProducts] = useState<any[]>([]);
+  const [wishlistProducts, setWishlistProducts] = useState<WishlistProductItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const supabase = createClient();
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push("/login?redirect=/wishlist");
-    } else if (user) {
-      fetchWishlist();
-    }
-  }, [user, authLoading]);
-
-  const fetchWishlist = async () => {
+  const fetchWishlist = React.useCallback(async () => {
     setIsLoading(true);
     // Fetch wishlist items joined with products
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("wishlist")
       .select(`
         product_id,
@@ -36,14 +38,27 @@ export default function WishlistPage() {
       .eq("user_id", user?.id);
 
     if (data) {
-      const products = data.map((item: any) => ({
-        ...item.products,
-        product_images: item.products.product_images
-      }));
+      const products = data
+        .map((item: { products?: WishlistProductItem | null }) => {
+          if (!item.products) return null;
+          return {
+            ...item.products,
+            product_images: item.products.product_images
+          };
+        })
+        .filter(Boolean) as WishlistProductItem[];
       setWishlistProducts(products);
     }
     setIsLoading(false);
-  };
+  }, [user?.id, supabase]);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/login?redirect=/wishlist");
+    } else if (user) {
+      fetchWishlist();
+    }
+  }, [user, authLoading, router, fetchWishlist]);
 
   if (authLoading || isLoading) {
     return (
@@ -63,8 +78,8 @@ export default function WishlistPage() {
       {wishlistProducts.length === 0 ? (
         <div className="flex flex-col items-center justify-center min-h-[40vh] text-center">
           <Heart className="w-16 h-16 text-border mb-4" />
-          <h2 className="text-2xl font-serif mb-2">It's empty here!</h2>
-          <p className="text-foreground-secondary mb-8">You haven't saved any items to your wishlist yet.</p>
+          <h2 className="text-2xl font-serif mb-2">It&apos;s empty here!</h2>
+          <p className="text-foreground-secondary mb-8">You haven&apos;t saved any items to your wishlist yet.</p>
           <Link href="/products">
             <Button variant="primary">Explore Products</Button>
           </Link>

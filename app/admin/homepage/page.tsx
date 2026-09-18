@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { 
-  LayoutDashboard, 
   Plus, 
   Trash2, 
   Save, 
@@ -12,9 +11,7 @@ import {
   Sparkles,
   Zap,
   Sliders,
-  Award,
   Flame,
-  Pin
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase";
@@ -78,7 +75,6 @@ export default function AdminHomepageManager() {
 
   const [activeTab, setActiveTab] = useState<"hero" | "campaign" | "spotlight" | "rules">("hero");
   const [heroSlides, setHeroSlides] = useState<HeroSlide[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
   // New slide form
@@ -123,13 +119,7 @@ export default function AdminHomepageManager() {
     }
   });
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  async function fetchData() {
-    setIsLoading(true);
-
+  const fetchData = useCallback(async () => {
     const [heroRes, configRes] = await Promise.all([
       supabase.from("hero_slides").select("*").order("sort_order", { ascending: true }),
       supabase.from("page_seo").select("meta_description").eq("page_slug", "homepage_config").single()
@@ -151,9 +141,11 @@ export default function AdminHomepageManager() {
         console.error("Error parsing campaign config:", e);
       }
     }
+  }, [supabase]);
 
-    setIsLoading(false);
-  }
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   // Toggle slide active state
   async function toggleSlideActive(id: string, currentStatus: boolean) {
@@ -430,7 +422,7 @@ export default function AdminHomepageManager() {
             <div>
               <h3 className="font-bold text-slate-900 text-base">Festival & Special Campaign Settings</h3>
               <p className="text-xs text-slate-500">
-                Change title from "Raksha Bandhan Specials" to "Diwali Sale" or "Durga Puja Specials" instantly
+                Change title from &quot;Raksha Bandhan Specials&quot; to &quot;Diwali Sale&quot; or &quot;Durga Puja Specials&quot; instantly
               </p>
             </div>
             <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">

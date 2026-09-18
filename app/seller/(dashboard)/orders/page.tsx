@@ -5,7 +5,6 @@ export const dynamic = "force-dynamic";
 import React, { useState, useEffect } from "react";
 import {
   Package,
-  Clock,
   CheckCircle2,
   Truck,
   XCircle,
@@ -43,6 +42,44 @@ interface SellerOrderItem {
   line_total: number;
 }
 
+interface OrderTimelineEvent {
+  id: string;
+  order_id?: string;
+  status: string;
+  created_at?: string;
+  note?: string;
+  [key: string]: unknown;
+}
+
+interface ProductContext {
+  orderItemTitle?: string;
+  orderItemPrice?: number;
+  orderNumber?: string;
+  orderItemCode?: string;
+  sku?: string;
+  quantity?: number;
+  productId?: string;
+  [key: string]: unknown;
+}
+
+interface ProductDetailData {
+  product_name?: string;
+  product_exists?: boolean;
+  is_active?: boolean;
+  image_url?: string;
+  unit_price?: number;
+  order_number?: string;
+  order_item_code?: string;
+  sku?: string;
+  category_name?: string;
+  store_name?: string;
+  ordered_quantity?: number;
+  current_stock?: number | string;
+  status?: string;
+  product_id?: string;
+  [key: string]: unknown;
+}
+
 interface SellerOrder {
   id: string;
   order_number: string;
@@ -54,7 +91,7 @@ interface SellerOrder {
   fulfillment_status: string;
   internal_status: string;
   created_at: string;
-  timeline: any[];
+  timeline: OrderTimelineEvent[];
 }
 
 export default function SellerOrdersPage() {
@@ -66,8 +103,8 @@ export default function SellerOrdersPage() {
 
   // Product Click Drawer/Modal state
   const [isProductDrawerOpen, setIsProductDrawerOpen] = useState(false);
-  const [productContext, setProductContext] = useState<any>(null);
-  const [productDetails, setProductDetails] = useState<any>(null);
+  const [productContext, setProductContext] = useState<ProductContext | null>(null);
+  const [productDetails, setProductDetails] = useState<ProductDetailData | null>(null);
   const [isLoadingProductDetails, setIsLoadingProductDetails] = useState(false);
   const [productFetchError, setProductFetchError] = useState<string | null>(null);
   const [copiedSku, setCopiedSku] = useState(false);
@@ -95,7 +132,7 @@ export default function SellerOrdersPage() {
   const supabase = createClient();
   const { addToast } = useToast();
 
-  const handleProductClick = async (orderItemId?: string, context?: any) => {
+  const handleProductClick = async (orderItemId?: string, context?: ProductContext) => {
     setIsProductDrawerOpen(true);
     setProductContext(context || {});
     setProductFetchError(null);
@@ -114,13 +151,14 @@ export default function SellerOrdersPage() {
 
       if (error) {
         setProductFetchError(error.message || "Failed to fetch seller store product details.");
-      } else if (data && data.success === false) {
-        setProductFetchError(data.error || "Order item does not belong to your seller store.");
+      } else if (data && (data as { success?: boolean }).success === false) {
+        setProductFetchError((data as { error?: string }).error || "Order item does not belong to your seller store.");
       } else if (data) {
-        setProductDetails(data);
+        setProductDetails(data as ProductDetailData);
       }
-    } catch (err: any) {
-      setProductFetchError(err.message || "Failed to load product listing details.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load product listing details.";
+      setProductFetchError(message);
     } finally {
       setIsLoadingProductDetails(false);
     }
@@ -175,8 +213,22 @@ export default function SellerOrdersPage() {
       // 1. Primary: Fetch anonymized seller orders via SECURITY DEFINER RPC (Zero Customer PII)
       const { data: rpcData, error: rpcErr } = await supabase.rpc("get_seller_orders");
 
+      interface RpcOrderRow {
+        order_id: string;
+        order_number: string;
+        customer_id_code?: string;
+        seller_total?: number;
+        payment_method?: string;
+        payment_status?: string;
+        fulfillment_status?: string;
+        internal_status?: string;
+        created_at: string;
+        items?: SellerOrderItem[];
+        timeline?: OrderTimelineEvent[];
+      }
+
       if (!rpcErr && rpcData) {
-        const compiled: SellerOrder[] = rpcData.map((row: any) => ({
+        const compiled: SellerOrder[] = (rpcData as RpcOrderRow[]).map((row) => ({
           id: row.order_id,
           order_number: row.order_number,
           customer_id_code: row.customer_id_code || `CUS-${row.order_id.substring(0, 6).toUpperCase()}`,
@@ -225,9 +277,31 @@ export default function SellerOrdersPage() {
         .eq("store_id", storeData.id);
 
       if (itemsData && itemsData.length > 0) {
-        const orderMap = new Map<string, { ord: any; items: SellerOrderItem[]; total: number }>();
+        interface RawOrderDetails {
+          id: string;
+          order_number: string;
+          payment_status: string;
+          fulfillment_status: string;
+          internal_status?: string;
+          created_at: string;
+        }
 
-        itemsData.forEach((item: any) => {
+        interface OrderItemWithOrder {
+          id: string;
+          order_id: string;
+          order_item_code?: string;
+          product_id?: string;
+          title: string;
+          sku?: string;
+          quantity: number;
+          unit_price: number;
+          line_total: number;
+          orders?: RawOrderDetails | RawOrderDetails[] | null;
+        }
+
+        const orderMap = new Map<string, { ord: RawOrderDetails; items: SellerOrderItem[]; total: number }>();
+
+        ((itemsData || []) as OrderItemWithOrder[]).forEach((item) => {
           const ord = Array.isArray(item.orders) ? item.orders[0] : item.orders;
           if (!ord) return;
 
@@ -254,8 +328,9 @@ export default function SellerOrdersPage() {
           .in("order_id", orderIds)
           .order("created_at", { ascending: false });
 
-        const timelineMap = new Map<string, any[]>();
-        (timelinesData || []).forEach((t: any) => {
+        const timelineMap = new Map<string, OrderTimelineEvent[]>();
+        ((timelinesData || []) as OrderTimelineEvent[]).forEach((t) => {
+          if (!t.order_id) return;
           const arr = timelineMap.get(t.order_id) || [];
           arr.push(t);
           timelineMap.set(t.order_id, arr);
@@ -293,10 +368,11 @@ export default function SellerOrdersPage() {
       } else {
         setOrders([]);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load seller orders.";
       addToast({
         title: "Error",
-        description: err.message || "Failed to load seller orders.",
+        description: message,
         type: "error",
       });
     } finally {
@@ -359,10 +435,11 @@ export default function SellerOrdersPage() {
       });
 
       fetchSellerOrders();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to update order status.";
       addToast({
         title: "Update Failed",
-        description: err.message || "Failed to update order status.",
+        description: message,
         type: "error",
       });
     } finally {
@@ -407,10 +484,11 @@ export default function SellerOrdersPage() {
 
       setCustomNote("");
       fetchSellerOrders();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not publish custom note.";
       addToast({
         title: "Failed to Post Note",
-        description: err.message || "Could not publish custom note.",
+        description: message,
         type: "error",
       });
     } finally {

@@ -7,21 +7,31 @@ import { formatCurrency } from "@/lib/utils";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
 
+interface DashboardOrder {
+  id: string;
+  order_number: string;
+  email: string;
+  created_at: string;
+  fulfillment_status: string;
+  total: number;
+}
+
+interface RevenueDataPoint {
+  name: string;
+  revenue: number;
+}
+
 export default function AdminDashboard() {
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+  const [recentOrders, setRecentOrders] = useState<DashboardOrder[]>([]);
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [totalOrders, setTotalOrders] = useState(0);
   const [totalCustomers, setTotalCustomers] = useState(0);
-  const [revenueData, setRevenueData] = useState<any[]>([]);
+  const [revenueData, setRevenueData] = useState<RevenueDataPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const supabase = createClient();
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = React.useCallback(async () => {
     setIsLoading(true);
 
     // 1. Fetch Orders
@@ -38,9 +48,9 @@ export default function AdminDashboard() {
 
     if (orders) {
       setTotalOrders(orders.length);
-      setRecentOrders(orders.slice(0, 5));
+      setRecentOrders(orders.slice(0, 5) as DashboardOrder[]);
       
-      const rev = orders.reduce((sum: number, order: any) => sum + (Number(order.total) || 0), 0);
+      const rev = orders.reduce((sum: number, order: { total: number | string | null }) => sum + (Number(order.total) || 0), 0);
       setTotalRevenue(rev);
 
       // Generate dummy chart data for now but using real total scale
@@ -57,7 +67,11 @@ export default function AdminDashboard() {
     
     setTotalCustomers(customerCount || 0);
     setIsLoading(false);
-  };
+  }, [supabase]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
   
@@ -83,7 +97,7 @@ export default function AdminDashboard() {
                 <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} tickFormatter={(value) => `$${value}`} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: any) => [formatCurrency(Number(value) || 0), "Revenue"]}
+                  formatter={(value: unknown) => [formatCurrency(Number(value) || 0), "Revenue"]}
                 />
                 <Line type="monotone" dataKey="revenue" stroke="#2563EB" strokeWidth={3} dot={{ r: 4, fill: '#2563EB', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
               </LineChart>
@@ -163,7 +177,7 @@ export default function AdminDashboard() {
   );
 }
 
-function KPICard({ title, value, icon: Icon, trend, trendUp }: { title: string, value: string, icon: any, trend: string, trendUp: boolean }) {
+function KPICard({ title, value, icon: Icon, trend, trendUp }: { title: string, value: string, icon: React.ComponentType<{ className?: string }>, trend: string, trendUp: boolean }) {
   return (
     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between group hover:border-slate-300 transition-colors">
       <div className="flex justify-between items-start mb-4">

@@ -1,13 +1,12 @@
 "use client";
 
 import React from "react";
-import { Store, MapPin, Search } from "lucide-react";
-import { Input } from "@/components/ui/Input";
+import { Store, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 export default function StoresPage() {
   return (
-    <div className="mx-auto max-w-[1440px] px-6 md:px-16 py-8 md:py-12 w-full pt-[80px] md:pt-[100px] min-h-[80vh] flex flex-col">
+    <div className="mx-auto max-w-[1440px] px-6 md:px-16 py-8 md:py-12 w-full min-h-[80vh] flex flex-col">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12 border-b border-border pb-6">
         <div>
           <h1 className="text-3xl md:text-4xl font-bold flex items-center gap-3">
@@ -38,7 +37,7 @@ export default function StoresPage() {
         </div>
         <h2 className="text-2xl font-bold mb-3">Seller Onboarding in Progress</h2>
         <p className="text-foreground-secondary max-w-md mx-auto mb-8 leading-relaxed">
-          We are currently onboarding the best local sellers in your area. Very soon, you'll be able to shop directly from your favorite neighborhood stores!
+          We are currently onboarding the best local sellers in your area. Very soon, you&apos;ll be able to shop directly from your favorite neighborhood stores!
         </p>
         <Button variant="outline" className="font-bold border-2">
           Notify Me When Stores Are Live

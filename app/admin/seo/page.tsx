@@ -6,8 +6,26 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase";
 
+interface SeoSettings {
+  id?: string;
+  meta_title_template?: string;
+  default_meta_description?: string;
+  og_default_image_url?: string;
+  google_analytics_id?: string;
+  ga_tracking_id?: string;
+  google_search_console_tag?: string;
+  search_console_meta?: string;
+  bing_webmaster_tag?: string;
+  facebook_pixel_id?: string;
+  fb_pixel_id?: string;
+  custom_head_scripts?: string;
+  robots_txt_custom?: string;
+  robots_txt?: string;
+  [key: string]: unknown;
+}
+
 export default function AdminSEOPage() {
-  const [settings, setSettings] = useState<any>({});
+  const [settings, setSettings] = useState<SeoSettings>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const { addToast } = useToast();
@@ -22,11 +40,11 @@ export default function AdminSEOPage() {
       setIsLoading(false);
     }
     fetchSettings();
-  }, []);
+  }, [supabase]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setSettings((prev: any) => ({
+    setSettings((prev) => ({
       ...prev,
       [name]: value
     }));
@@ -75,7 +93,7 @@ export default function AdminSEOPage() {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200 bg-slate-50/50">
             <h3 className="text-lg font-semibold flex items-center gap-2"><Search className="w-5 h-5 text-slate-500" /> Global Meta Tags</h3>
-            <p className="text-sm text-slate-500 mt-1">Default meta information used when page-specific tags aren't set.</p>
+            <p className="text-sm text-slate-500 mt-1">Default meta information used when page-specific tags aren&apos;t set.</p>
           </div>
           <div className="p-6 flex flex-col gap-6">
             <div className="flex flex-col gap-2">

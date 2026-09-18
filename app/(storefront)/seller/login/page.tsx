@@ -12,6 +12,17 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 
+interface SellerAuthData {
+  user?: {
+    user_metadata?: {
+      is_seller_registration?: boolean;
+      store_name?: string;
+      full_name?: string;
+      phone?: string;
+    };
+  } | null;
+}
+
 function SellerLoginContent() {
   const [loginMethod, setLoginMethod] = useState<"password" | "otp">("password");
   const [showOTPVerification, setShowOTPVerification] = useState(false);
@@ -25,7 +36,7 @@ function SellerLoginContent() {
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/seller";
 
-  const routeSeller = async (userId: string, authData: any = null) => {
+  const routeSeller = async (userId: string, authData: SellerAuthData | null = null) => {
     // Check profile role and seller profile
     const { data: profile } = await supabase
       .from("profiles")
@@ -50,16 +61,16 @@ function SellerLoginContent() {
       const isSellerReg = authData?.user?.user_metadata?.is_seller_registration;
       
       if (isSellerReg) {
-         const meta = authData.user!.user_metadata;
-         const { error: insertError } = await supabase.from("seller_profiles").insert({
-           id: userId,
-           business_name: meta.store_name || "New Store",
-           contact_name: meta.full_name || "Contact",
-           phone: meta.phone || "",
-           business_email: email,
-           business_type: "retail",
-           verification_status: "pending"
-         });
+          const meta = authData?.user?.user_metadata || {};
+          const { error: insertError } = await supabase.from("seller_profiles").insert({
+            id: userId,
+            business_name: meta.store_name || "New Store",
+            contact_name: meta.full_name || "Contact",
+            phone: meta.phone || "",
+            business_email: email,
+            business_type: "retail",
+            verification_status: "pending"
+          });
          
          if (!insertError) {
            addToast({ title: "Welcome!", description: "Your seller profile is created and pending approval.", type: "success" });
@@ -128,7 +139,7 @@ function SellerLoginContent() {
   };
 
   return (
-    <div className="flex-1 flex min-h-[80vh] w-full mt-[60px] md:mt-[80px]">
+    <div className="flex-1 flex min-h-[80vh] w-full">
       <div className="hidden lg:flex w-1/2 bg-accent/5 flex-col items-center justify-center p-12 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-brand-fashion/20 via-background to-accent/20 z-0" />
         <div className="relative z-10 text-center max-w-lg">

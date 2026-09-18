@@ -27,7 +27,7 @@ export default function ContactPage() {
       <div className="text-center max-w-2xl mx-auto mb-16">
         <h1 className="text-4xl md:text-5xl font-serif mb-4">Contact Us</h1>
         <p className="text-foreground-secondary text-lg">
-          Have a question or need assistance? We're here to help. Reach out to our customer service team and we'll respond as soon as possible.
+          Have a question or need assistance? We&apos;re here to help. Reach out to our customer service team and we&apos;ll respond as soon as possible.
         </p>
       </div>
 

@@ -5,7 +5,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatCurrency } from "@/lib/utils";
-import { Button } from "./Button";
 import { Heart } from "lucide-react";
 import { useAuth } from "@/lib/context/AuthContext";
 import { createClient } from "@/lib/supabase";
@@ -55,7 +54,7 @@ export function ProductCard({
   React.useEffect(() => {
     if (user && id) {
       supabase.from("wishlist").select("id").eq("user_id", user.id).eq("product_id", id).single()
-        .then(({ data }: { data: any }) => {
+        .then(({ data }: { data: { id: string } | null }) => {
           if (data) setIsWishlisted(true);
         });
     }
@@ -81,11 +80,7 @@ export function ProductCard({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 30 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: "-50px" }}
-      transition={{ duration: 0.6 }}
+    <div
       className="group relative flex flex-col gap-3 bg-card p-3 rounded-2xl shadow-sm border border-border hover:shadow-md hover:border-accent/30 transition-all h-full"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -195,6 +190,6 @@ export function ProductCard({
           )}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

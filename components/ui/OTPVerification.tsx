@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase";
 import { Button } from "./Button";
 import { useToast } from "./Toast";
 import { Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 
 interface OTPVerificationProps {
   email: string;
@@ -21,7 +20,6 @@ export function OTPVerification({ email, type, onVerified, title = "Enter Verifi
   const [resendCooldown, setResendCooldown] = useState(60);
   const { addToast } = useToast();
   const supabase = createClient();
-  const router = useRouter();
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -115,7 +113,7 @@ export function OTPVerification({ email, type, onVerified, title = "Enter Verifi
       </form>
 
       <div className="text-sm mt-4">
-        <p className="text-foreground-secondary mb-2">Didn't receive the code?</p>
+        <p className="text-foreground-secondary mb-2">Didn&apos;t receive the code?</p>
         <button 
           onClick={handleResend}
           disabled={resendCooldown > 0 || isLoading}

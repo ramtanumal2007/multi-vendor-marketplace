@@ -31,7 +31,24 @@ export default async function SellerDashboardLayout({ children }: { children: Re
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "seller" && profile?.role !== "admin") {
+  const { data: sellerProfile } = await supabase
+    .from("seller_profiles")
+    .select("verification_status")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profile?.role === "admin") {
+    // Admin authorized
+  } else if (sellerProfile?.verification_status === "approved") {
+    // Approved seller authorized
+  } else if (sellerProfile?.verification_status === "suspended") {
+    // Suspended seller blocked
+    redirect("/seller/tracking");
+  } else if (sellerProfile) {
+    // Pending / Reviewing seller redirected to tracking
+    redirect("/seller/tracking");
+  } else {
+    // Customer without seller profile redirected to onboarding
     redirect("/seller/onboarding");
   }
 

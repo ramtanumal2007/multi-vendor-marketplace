@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase";
 import {
   Briefcase,
@@ -19,7 +19,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { Modal } from "@/components/ui/Modal";
-import { formatCurrency, formatExactDateTime, formatRelativeTime, formatSequentialSellerId } from "@/lib/utils";
+import { formatCurrency, formatRelativeTime, formatSequentialSellerId } from "@/lib/utils";
 import { SellerDetailsModal } from "@/components/admin/SellerDetailsModal";
 import { CustomerDetailsModal } from "@/components/admin/CustomerDetailsModal";
 
@@ -54,9 +54,9 @@ export default function AdminSellersPage() {
 
   // Action Dialog state
   const [actionLoading, setActionLoading] = useState(false);
-  const [actionTargetSeller, setActionTargetSeller] = useState<any>(null);
+  const [actionTargetSeller, setActionTargetSeller] = useState<EnrichedSeller | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogAction, setDialogAction] = useState<"approve" | "reject" | "return_for_correction" | "suspend">("approve");
+  const [dialogAction, setDialogAction] = useState<"approve" | "reject" | "return_for_correction" | "suspend" | "unsuspend">("approve");
   const [adminComment, setAdminComment] = useState("");
 
   // Interconnected Modal states
@@ -66,7 +66,7 @@ export default function AdminSellersPage() {
   const supabase = createClient();
   const { addToast } = useToast();
 
-  const fetchSellers = async () => {
+  const fetchSellers = useCallback(async () => {
     setIsLoading(true);
 
     try {
@@ -85,17 +85,17 @@ export default function AdminSellersPage() {
 
       if (sellerData && sellerData.length > 0) {
         const storeIds = sellerData
-          .map((s: any) => (Array.isArray(s.stores) ? s.stores[0]?.id : s.stores?.id))
-          .filter(Boolean);
+          .map((s: { stores?: { id?: string } | { id?: string }[] | null }) => (Array.isArray(s.stores) ? s.stores[0]?.id : s.stores?.id))
+          .filter(Boolean) as string[];
 
         // 2. Fetch Product Counts per Store
-        let productCountMap = new Map<string, number>();
+        const productCountMap = new Map<string, number>();
         if (storeIds.length > 0) {
           const { data: prodData } = await supabase
             .from("products")
             .select("store_id");
 
-          (prodData || []).forEach((p: any) => {
+          (prodData || []).forEach((p: { store_id?: string | null }) => {
             if (p.store_id) {
               productCountMap.set(p.store_id, (productCountMap.get(p.store_id) || 0) + 1);
             }
@@ -103,7 +103,7 @@ export default function AdminSellersPage() {
         }
 
         // 3. Fetch Order Stats per Store
-        let orderStatsMap = new Map<
+        const orderStatsMap = new Map<
           string,
           { total_orders: Set<string>; total_sales: number; last_order_at: string | null }
         >();
@@ -114,7 +114,7 @@ export default function AdminSellersPage() {
             .select("store_id, order_id, line_total, orders(created_at)")
             .in("store_id", storeIds);
 
-          (itemData || []).forEach((item: any) => {
+          (itemData || []).forEach((item: { store_id?: string | null; order_id?: string | null; line_total?: number | string | null; orders?: { created_at?: string } | { created_at?: string }[] | null }) => {
             if (!item.store_id) return;
             const current = orderStatsMap.get(item.store_id) || {
               total_orders: new Set<string>(),
@@ -136,7 +136,7 @@ export default function AdminSellersPage() {
           });
         }
 
-        const enriched: EnrichedSeller[] = sellerData.map((s: any) => {
+        const enriched: EnrichedSeller[] = sellerData.map((s: EnrichedSeller & { stores?: { id: string; name: string; status: string; slug: string } | { id: string; name: string; status: string; slug: string }[] | null }) => {
           const storeObj = Array.isArray(s.stores) ? s.stores[0] : s.stores;
           const storeId = storeObj?.id;
           const pCount = storeId ? productCountMap.get(storeId) || 0 : 0;
@@ -156,18 +156,19 @@ export default function AdminSellersPage() {
       } else {
         setSellers([]);
       }
-    } catch (err: any) {
-      addToast({ title: "Error", description: err.message || "Failed to fetch sellers.", type: "error" });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to fetch sellers.";
+      addToast({ title: "Error", description: message, type: "error" });
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [filter, supabase, addToast]);
 
   useEffect(() => {
     fetchSellers();
-  }, [filter]);
+  }, [fetchSellers]);
 
-  const handleActionClick = (seller: any, action: "approve" | "reject" | "return_for_correction" | "suspend") => {
+  const handleActionClick = (seller: EnrichedSeller, action: "approve" | "reject" | "return_for_correction" | "suspend" | "unsuspend") => {
     setActionTargetSeller(seller);
     setDialogAction(action);
     setAdminComment("");
@@ -191,6 +192,17 @@ export default function AdminSellersPage() {
         const { error } = await supabase.rpc("suspend_seller", { p_seller_id: actionTargetSeller.id });
         if (error) throw error;
         addToast({ title: "Suspended", description: "Seller has been suspended.", type: "success" });
+      } else if (dialogAction === "unsuspend") {
+        const { error } = await supabase.rpc("unsuspend_seller", { p_seller_id: actionTargetSeller.id });
+        if (error) {
+          // Fallback direct updates if RPC not yet deployed on DB instance
+          const { error: err1 } = await supabase.from("seller_profiles").update({ verification_status: "approved", updated_at: new Date().toISOString() }).eq("id", actionTargetSeller.id);
+          if (err1) throw err1;
+          await supabase.from("profiles").update({ role: "seller", updated_at: new Date().toISOString() }).eq("id", actionTargetSeller.id);
+          await supabase.from("stores").update({ status: "approved", updated_at: new Date().toISOString() }).eq("seller_id", actionTargetSeller.id);
+          await supabase.from("seller_application_events").insert({ seller_id: actionTargetSeller.id, event_type: "unsuspended" });
+        }
+        addToast({ title: "Reactivated", description: "Seller has been unsuspended and reactivated.", type: "success" });
       } else if (dialogAction === "return_for_correction") {
         if (!adminComment.trim()) throw new Error("A comment is required.");
         const { error } = await supabase.rpc("return_for_correction", {
@@ -203,8 +215,9 @@ export default function AdminSellersPage() {
 
       setDialogOpen(false);
       fetchSellers();
-    } catch (err: any) {
-      addToast({ title: "Error", description: err.message || "Failed to process action.", type: "error" });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to process action.";
+      addToast({ title: "Error", description: message, type: "error" });
     } finally {
       setActionLoading(false);
     }
@@ -391,6 +404,15 @@ export default function AdminSellersPage() {
                               Suspend Seller
                             </button>
                           </div>
+                        ) : seller.verification_status === "suspended" ? (
+                          <div className="pt-1">
+                            <button
+                              onClick={() => handleActionClick(seller, "unsuspend")}
+                              className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded text-[11px] font-semibold transition-colors"
+                            >
+                              Unsuspend / Reactivate Seller
+                            </button>
+                          </div>
                         ) : null}
                       </td>
                     </tr>
@@ -420,6 +442,8 @@ export default function AdminSellersPage() {
               ? "Reject Seller"
               : dialogAction === "suspend"
               ? "Suspend Seller"
+              : dialogAction === "unsuspend"
+              ? "Unsuspend / Reactivate Seller"
               : "Return for Correction"
           }
         >
@@ -427,18 +451,22 @@ export default function AdminSellersPage() {
             <div className="flex items-start gap-4 mb-6">
               <div
                 className={`p-3 rounded-full ${
-                  dialogAction === "approve"
+                  dialogAction === "approve" || dialogAction === "unsuspend"
                     ? "bg-green-100 text-green-600"
-                    : dialogAction === "reject"
+                    : dialogAction === "reject" || dialogAction === "suspend"
                     ? "bg-red-100 text-red-600"
                     : "bg-purple-100 text-purple-600"
                 }`}
               >
-                {dialogAction === "approve" ? <CheckCircle className="w-6 h-6" /> : <AlertCircle className="w-6 h-6" />}
+                {dialogAction === "approve" || dialogAction === "unsuspend" ? (
+                  <CheckCircle className="w-6 h-6" />
+                ) : (
+                  <AlertCircle className="w-6 h-6" />
+                )}
               </div>
               <div className="flex-1">
                 <p className="text-slate-600 text-sm mt-1">
-                  Are you sure you want to {dialogAction.replace(/_/g, " ")} the application for{" "}
+                  Are you sure you want to {dialogAction === "unsuspend" ? "unsuspend and reactivate" : dialogAction.replace(/_/g, " ")} the seller{" "}
                   <strong>{actionTargetSeller.business_name || actionTargetSeller.contact_name}</strong>?
                 </p>
 
@@ -464,9 +492,9 @@ export default function AdminSellersPage() {
               <Button
                 variant="primary"
                 className={
-                  dialogAction === "approve"
+                  dialogAction === "approve" || dialogAction === "unsuspend"
                     ? "bg-green-600 hover:bg-green-700"
-                    : dialogAction === "reject"
+                    : dialogAction === "reject" || dialogAction === "suspend"
                     ? "bg-red-600 hover:bg-red-700"
                     : "bg-purple-600 hover:bg-purple-700"
                 }

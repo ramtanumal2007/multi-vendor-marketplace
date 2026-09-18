@@ -8,6 +8,8 @@ import { useToast } from "@/components/ui/Toast";
 import { useRouter } from "next/navigation";
 import { Lock, CheckCircle2, ArrowRight } from "lucide-react";
 
+import type { User } from "@supabase/supabase-js";
+
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -20,8 +22,8 @@ export default function ResetPasswordPage() {
   const router = useRouter();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }: { data: any }) => {
-      if (data.user) {
+    supabase.auth.getUser().then(({ data }: { data: { user: User | null } }) => {
+      if (data?.user) {
         setSessionUser(data.user.email || null);
       }
     });
@@ -58,7 +60,7 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <div className="flex-1 flex items-center justify-center py-20 px-6 mt-[60px] md:mt-[80px] bg-background">
+    <div className="flex-1 flex items-center justify-center py-20 px-6 bg-background">
       <div className="w-full max-w-md bg-background border border-border rounded-2xl p-8 shadow-sm">
         <div className="text-center mb-8">
           <div className="w-12 h-12 rounded-2xl bg-accent/10 text-accent flex items-center justify-center mx-auto mb-4">

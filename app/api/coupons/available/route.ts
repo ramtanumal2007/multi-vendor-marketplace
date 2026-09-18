@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     // Prepare product metadata mapping for target scope checking
     let prodMetaMap = new Map<string, { category_id?: string; store_id?: string }>();
     if (items.length > 0) {
-      const productIds = items.map((i: any) => i.productId).filter(Boolean);
+      const productIds = items.map((i: { productId?: string }) => i.productId).filter(Boolean);
       if (productIds.length > 0) {
         const { data: prodsData } = await supabase
           .from("products")
@@ -39,13 +39,26 @@ export async function POST(req: Request) {
           .in("id", productIds);
 
         prodMetaMap = new Map(
-          prodsData?.map((p: any) => [p.id, { category_id: p.category_id, store_id: p.store_id }]) || []
+          (prodsData as Array<{ id: string; category_id?: string; store_id?: string }> | null)?.map((p) => [p.id, { category_id: p.category_id, store_id: p.store_id }]) || []
         );
       }
     }
 
-    const applicableCoupons: any[] = [];
-    const otherCoupons: any[] = [];
+    interface CouponResponseItem {
+      id: string;
+      code: string;
+      type: string;
+      value: number;
+      min_order_amount: number;
+      estimatedDiscount: number;
+      isApplicable: boolean;
+      reason: string;
+      is_first_order_only?: boolean;
+      displayBadge: string;
+    }
+
+    const applicableCoupons: CouponResponseItem[] = [];
+    const otherCoupons: CouponResponseItem[] = [];
 
     for (const coupon of coupons) {
       const minOrder = Number(coupon.min_order_amount || 0);
@@ -137,7 +150,7 @@ export async function POST(req: Request) {
       applicableCoupons,
       otherCoupons,
     });
-  } catch (err: any) {
+  } catch {
     return NextResponse.json({ applicableCoupons: [], otherCoupons: [] }, { status: 500 });
   }
 }

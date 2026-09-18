@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Bell, Check, Info, ShieldCheck, Package, AlertTriangle, Tag, ExternalLink, X, CheckCheck, Sparkles } from "lucide-react";
+import { Bell, Info, ShieldCheck, Package, AlertTriangle, Tag, ExternalLink, X, CheckCheck, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 
 interface SellerNotificationCenterProps {
@@ -82,7 +82,7 @@ export function SellerNotificationCenter({ sellerId }: SellerNotificationCenterP
           table: "seller_notifications",
           filter: `seller_id=eq.${sellerId}`,
         },
-        (payload: any) => {
+        (payload: { new: SellerNotification }) => {
           const newNotif = payload.new as SellerNotification;
           setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
         }
@@ -95,7 +95,7 @@ export function SellerNotificationCenter({ sellerId }: SellerNotificationCenterP
           table: "seller_notifications",
           filter: `seller_id=eq.${sellerId}`,
         },
-        (payload: any) => {
+        (payload: { new: SellerNotification }) => {
           const updatedNotif = payload.new as SellerNotification;
           setNotifications((prev) =>
             prev.map((n) => (n.id === updatedNotif.id ? { ...n, ...updatedNotif } : n))

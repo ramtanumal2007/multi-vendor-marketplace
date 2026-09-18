@@ -14,35 +14,43 @@ function formatDate(dateString: string) {
   }).format(new Date(dateString));
 }
 
+import type { User } from "@supabase/supabase-js";
+
+interface RecentOrderRow {
+  id: string;
+  order_number: string;
+  created_at: string;
+  fulfillment_status: string;
+  total: number;
+}
+
 export default function AccountDashboard() {
-  const [user, setUser] = useState<any>(null);
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+  const [user, setUser] = useState<User | null>(null);
+  const [recentOrders, setRecentOrders] = useState<RecentOrderRow[]>([]);
   const [totalOrders, setTotalOrders] = useState(0);
   const supabase = createClient();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }: { data: any }) => {
+    async function initUserAndOrders() {
+      const { data } = await supabase.auth.getUser();
       if (data.user) {
         setUser(data.user);
-        fetchOrders(data.user.id);
+        const { data: orderData, count } = await supabase
+          .from('orders')
+          .select('*', { count: 'exact' })
+          .eq('user_id', data.user.id)
+          .order('created_at', { ascending: false });
+          
+        if (orderData) {
+          setRecentOrders(orderData.slice(0, 5) as RecentOrderRow[]);
+        }
+        if (count !== null) {
+          setTotalOrders(count);
+        }
       }
-    });
-  }, []);
-
-  async function fetchOrders(userId: string) {
-    const { data, count } = await supabase
-      .from('orders')
-      .select('*', { count: 'exact' })
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-      
-    if (data) {
-      setRecentOrders(data.slice(0, 5));
     }
-    if (count !== null) {
-      setTotalOrders(count);
-    }
-  }
+    initUserAndOrders();
+  }, [supabase]);
 
 
   if (!user) return <div className="animate-pulse h-40 bg-background-secondary rounded-lg" />;

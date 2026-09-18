@@ -44,9 +44,9 @@ export default function ApplicationTrackingClient({ initialProfile, userId }: { 
           table: 'seller_profiles',
           filter: `id=eq.${userId}`
         },
-        (payload: any) => {
+        (payload: { new: SellerProfile }) => {
           if (payload.new) {
-            setProfile(payload.new as SellerProfile);
+            setProfile(payload.new);
             // In a real application, you might also want to router.refresh() 
             // if the status change implies a layout change (e.g., pending -> approved)
             // so the server knows to grant dashboard access next time.
@@ -176,7 +176,7 @@ export default function ApplicationTrackingClient({ initialProfile, userId }: { 
                   {getStepStatus(2) === 'current' && profile.verification_status !== 'correction_required' && (
                     <div className="mt-3 bg-blue-50 text-blue-700 p-3 rounded text-sm border border-blue-100 flex items-start gap-2">
                       <InfoIcon className="w-5 h-5 flex-shrink-0" />
-                      <p>Your application is currently in the queue. You'll receive an email update once a decision is made.</p>
+                      <p>Your application is currently in the queue. You&apos;ll receive an email update once a decision is made.</p>
                     </div>
                   )}
                   {profile.verification_status === 'correction_required' && (
@@ -226,7 +226,10 @@ export default function ApplicationTrackingClient({ initialProfile, userId }: { 
                   
                   {profile.verification_status === 'approved' && (
                     <button 
-                      onClick={() => router.push('/seller')}
+                      onClick={() => {
+                        router.refresh();
+                        router.push('/seller');
+                      }}
                       className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
                     >
                       Go to Seller Dashboard
@@ -263,7 +266,7 @@ export default function ApplicationTrackingClient({ initialProfile, userId }: { 
   );
 }
 
-function InfoIcon(props: any) {
+function InfoIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="10"></circle>

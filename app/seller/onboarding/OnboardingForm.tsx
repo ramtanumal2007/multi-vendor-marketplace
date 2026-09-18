@@ -47,9 +47,10 @@ export default function OnboardingForm() {
 
       router.push("/seller/tracking?submitted=true");
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || "An error occurred during onboarding.");
+      const message = err instanceof Error ? err.message : "An error occurred during onboarding.";
+      setError(message);
     } finally {
       setLoading(false);
     }

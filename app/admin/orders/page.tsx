@@ -37,11 +37,7 @@ export default function AdminOrdersPage() {
 
   const supabase = createClient();
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
-
-  async function fetchOrders() {
+  const fetchOrders = React.useCallback(async () => {
     setIsLoading(true);
 
     try {
@@ -54,18 +50,18 @@ export default function AdminOrdersPage() {
       if (orderErr) throw orderErr;
 
       if (orderData && orderData.length > 0) {
-        const orderIds = orderData.map((o: any) => o.id);
-        const userIds = orderData.map((o: any) => o.user_id).filter(Boolean);
+        const orderIds = orderData.map((o: { id: string }) => o.id);
+        const userIds = orderData.map((o: { user_id?: string | null }) => o.user_id).filter(Boolean) as string[];
 
         // 2. Fetch Customer Names & Customer Code
-        let profilesMap = new Map<string, { name: string; code: string }>();
+        const profilesMap = new Map<string, { name: string; code: string }>();
         if (userIds.length > 0) {
           const { data: profiles } = await supabase
             .from("profiles")
             .select("id, full_name, customer_id_code")
             .in("id", userIds);
 
-          (profiles || []).forEach((p: any) => {
+          (profiles || []).forEach((p: { id: string; full_name?: string | null; customer_id_code?: string | null }) => {
             profilesMap.set(p.id, {
               name: p.full_name || "",
               code: p.customer_id_code || "",
@@ -80,7 +76,7 @@ export default function AdminOrdersPage() {
           .in("order_id", orderIds);
 
         const storeNameMap = new Map<string, Set<string>>();
-        (itemsData || []).forEach((item: any) => {
+        (itemsData || []).forEach((item: { order_id: string; stores?: { name?: string } | { name?: string }[] | null }) => {
           const store = Array.isArray(item.stores) ? item.stores[0] : item.stores;
           if (store?.name) {
             const set = storeNameMap.get(item.order_id) || new Set<string>();
@@ -96,13 +92,13 @@ export default function AdminOrdersPage() {
           .order("created_at", { ascending: false });
 
         const timelineMap = new Map<string, string>();
-        (timelineData || []).forEach((t: any) => {
+        (timelineData || []).forEach((t: { order_id: string; status: string; created_at: string }) => {
           if (!timelineMap.has(t.order_id)) {
             timelineMap.set(t.order_id, t.status);
           }
         });
 
-        const enriched: EnrichedOrder[] = orderData.map((ord: any) => {
+        const enriched: EnrichedOrder[] = orderData.map((ord: { id: string; order_number: string; invoice_number?: string | null; user_id?: string | null; email: string; shipping_address?: { first_name?: string; last_name?: string } | null; total: number | string | null; payment_status: string; fulfillment_status: string; internal_status?: string | null; created_at: string }) => {
           const ship = ord.shipping_address || {};
           const profileObj = ord.user_id ? profilesMap.get(ord.user_id) : null;
           const customerName =
@@ -140,7 +136,11 @@ export default function AdminOrdersPage() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [supabase]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {

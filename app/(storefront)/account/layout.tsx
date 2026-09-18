@@ -8,6 +8,8 @@ import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
 
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
+
 const ACCOUNT_LINKS = [
   { label: "Dashboard", href: "/account", icon: User },
   { label: "Orders", href: "/account/orders", icon: Package },
@@ -35,7 +37,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
     checkUser();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event: any, session: any) => {
+      (event: AuthChangeEvent, session: Session | null) => {
         if (event === "SIGNED_OUT" || !session) {
           router.push("/login");
         }

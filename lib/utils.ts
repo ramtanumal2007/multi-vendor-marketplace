@@ -160,6 +160,8 @@ export function getDeliveryEstimateText(
   customerPin?: string | null,
   storePin?: string | null
 ): { message: string; isEstimated: boolean; estimatedDateRange?: string } {
+  void customerPin;
+  void storePin;
   const processing = typeof sellerProcessingDays === "number" && sellerProcessingDays > 0 ? sellerProcessingDays : null;
 
   if (processing !== null) {

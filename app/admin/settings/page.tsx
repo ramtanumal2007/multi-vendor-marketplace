@@ -3,12 +3,34 @@
 import React, { useState, useEffect } from "react";
 import { Save, Settings } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase";
 
+interface SiteSettings {
+  id?: string;
+  site_name?: string;
+  tagline?: string;
+  logo_url?: string;
+  favicon_url?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  support_address?: string;
+  business_address?: string;
+  currency_code?: string;
+  currency_symbol?: string;
+  default_tax_rate?: number | string;
+  tax_rate?: number | string;
+  free_delivery_threshold?: number | string;
+  free_shipping_threshold?: number;
+  enable_user_registration?: boolean;
+  enable_reviews?: boolean;
+  maintenance_mode?: boolean;
+  announcement_bar_enabled?: boolean;
+  announcement_bar_text?: string;
+}
+
 export default function AdminSettingsPage() {
-  const [settings, setSettings] = useState<any>({});
+  const [settings, setSettings] = useState<SiteSettings>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const { addToast } = useToast();
@@ -23,11 +45,11 @@ export default function AdminSettingsPage() {
       setIsLoading(false);
     }
     fetchSettings();
-  }, []);
+  }, [supabase]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
-    setSettings((prev: any) => ({
+    setSettings((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value
     }));
@@ -76,7 +98,7 @@ export default function AdminSettingsPage() {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200 bg-slate-50/50">
             <h3 className="text-lg font-semibold flex items-center gap-2"><Settings className="w-5 h-5 text-slate-500" /> Brand Identity</h3>
-            <p className="text-sm text-slate-500 mt-1">Define your store's name and tagline.</p>
+            <p className="text-sm text-slate-500 mt-1">Define your store&apos;s name and tagline.</p>
           </div>
           <div className="p-6 flex flex-col gap-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

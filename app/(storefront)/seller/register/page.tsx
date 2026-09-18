@@ -46,7 +46,7 @@ function SellerRegisterContent() {
       }
     }
     checkAuth();
-  }, [supabase.auth, router]);
+  }, [supabase, router]);
 
   const handleVerified = async () => {
     setIsLoading(true);
@@ -124,7 +124,7 @@ function SellerRegisterContent() {
   };
 
   return (
-    <div className="flex-1 flex min-h-[80vh] w-full mt-[60px] md:mt-[80px]">
+    <div className="flex-1 flex min-h-[80vh] w-full">
       <div className="hidden lg:flex w-1/2 bg-accent/5 flex-col items-center justify-center p-12 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-brand-fashion/20 via-background to-accent/20 z-0" />
         <div className="relative z-10 text-center max-w-lg">

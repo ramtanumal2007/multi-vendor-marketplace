@@ -1,10 +1,17 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, AreaChart, Area } from "recharts";
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, AreaChart, Area } from "recharts";
 import { DollarSign, ShoppingCart, TrendingUp, Users } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { createClient } from "@/lib/supabase";
+
+interface DailyRevenue {
+  name: string;
+  fullDate: string;
+  revenue: number;
+  orders: number;
+}
 
 export default function AdminAnalyticsPage() {
   const [isLoading, setIsLoading] = useState(true);
@@ -14,7 +21,7 @@ export default function AdminAnalyticsPage() {
     totalCustomers: 0,
     avgOrderValue: 0
   });
-  const [revenueData, setRevenueData] = useState<any[]>([]);
+  const [revenueData, setRevenueData] = useState<DailyRevenue[]>([]);
   
   const supabase = createClient();
 
@@ -35,7 +42,7 @@ export default function AdminAnalyticsPage() {
         .eq("role", "customer");
 
       if (orders) {
-        const totalRevenue = orders.reduce((sum: number, order: any) => sum + (Number(order.total) || 0), 0);
+        const totalRevenue = orders.reduce((sum: number, order: { total: number | null }) => sum + (Number(order.total) || 0), 0);
         const totalOrders = orders.length;
         const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
@@ -53,9 +60,9 @@ export default function AdminAnalyticsPage() {
           return d.toISOString().split('T')[0];
         });
 
-        const dailyRevenue = last7Days.map(dateStr => {
-          const dayOrders = orders.filter((o: any) => o.created_at.startsWith(dateStr));
-          const rev = dayOrders.reduce((sum: number, o: any) => sum + (Number(o.total) || 0), 0);
+        const dailyRevenue: DailyRevenue[] = last7Days.map(dateStr => {
+          const dayOrders = orders.filter((o: { created_at: string }) => o.created_at.startsWith(dateStr));
+          const rev = dayOrders.reduce((sum: number, o: { total: number | null }) => sum + (Number(o.total) || 0), 0);
           const shortName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(new Date(dateStr));
           return { name: shortName, fullDate: dateStr, revenue: rev, orders: dayOrders.length };
         });
@@ -66,7 +73,7 @@ export default function AdminAnalyticsPage() {
       setIsLoading(false);
     }
     fetchAnalytics();
-  }, []);
+  }, [supabase]);
 
   if (isLoading) {
     return <div className="p-12 flex justify-center"><div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>;
@@ -77,7 +84,7 @@ export default function AdminAnalyticsPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Analytics & Reports</h1>
-          <p className="text-sm text-slate-500 mt-1">Detailed breakdown of your store's performance.</p>
+          <p className="text-sm text-slate-500 mt-1">Detailed breakdown of your store&apos;s performance.</p>
         </div>
       </div>
 
@@ -106,7 +113,7 @@ export default function AdminAnalyticsPage() {
                 <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} tickFormatter={(val) => `₹${val}`} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: any) => [formatCurrency(Number(value) || 0), "Revenue"]}
+                  formatter={(value: unknown) => [formatCurrency(Number(value) || 0), "Revenue"]}
                 />
                 <Area type="monotone" dataKey="revenue" stroke="#2563EB" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
               </AreaChart>

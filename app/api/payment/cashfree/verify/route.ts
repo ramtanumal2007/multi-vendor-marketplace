@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { fetchCashfreeOrder, fetchCashfreeOrderPayments, CashfreePaymentItem } from "@/lib/cashfree";
+import { createOrderRecord } from "@/lib/order-service";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ export async function POST(req: Request) {
         .update({
           payment_status: "paid",
           payment_method: "ONLINE",
-          razorpay_payment_id: paymentReference, // preserves existing payment reference column
+          razorpay_payment_id: paymentReference,
           updated_at: new Date().toISOString(),
         })
         .eq("id", existingOrder.id)
@@ -119,20 +120,13 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Fallback: Create Order via Single Pipeline if not already pre-created
-    const orderCreateUrl = new URL("/api/orders/create", req.url).toString();
-    const orderCreateRes = await fetch(orderCreateUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...orderPayload,
-        paymentMethod: "ONLINE",
-        paymentStatus: "paid",
-        paymentReferenceId: paymentReference,
-      }),
+    // 3. Fallback: Atomically Create Order via Server Function if not already created
+    const orderCreateResult = await createOrderRecord({
+      ...orderPayload,
+      paymentMethod: "ONLINE",
+      paymentStatus: "paid",
+      paymentReferenceId: paymentReference,
     });
-
-    const orderCreateResult = await orderCreateRes.json();
 
     if (!orderCreateResult.success) {
       console.error("Order creation failed after Cashfree verification:", orderCreateResult.message);

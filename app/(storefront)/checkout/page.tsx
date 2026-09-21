@@ -836,41 +836,19 @@ export default function CheckoutPage() {
         router.push(`/checkout/success?order=${result.order_number}`);
       } else {
         // ONLINE PAYMENT via Cashfree Payment Gateway
-        // 1. Authoritative Internal Order Creation (status: pending, atomic stock reservation)
-        const orderResponse = await fetch("/api/orders/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: user?.id,
-            email: form.email.trim() || user?.email,
-            shippingAddress,
-            paymentMethod: "ONLINE",
-            paymentStatus: "pending",
-            shippingMethod: `${selectedCityRule.name} Delivery`,
-            shippingCost: calculatedDeliveryFee,
-            cityRuleName: selectedCityRule.name,
-            items: checkoutItems,
-            couponCode: appliedCoupon ? appliedCoupon.code : null,
-            idempotencyKey: attemptId,
-          }),
-        });
-
-        const internalOrderResult = await orderResponse.json();
-        if (!internalOrderResult.success) {
-          throw new Error(internalOrderResult.message || "Failed to initialize internal order.");
-        }
-
-        // 2. Authoritative Cashfree Payment Order Creation
+        // 1. Authoritative Cashfree Payment Order Creation FIRST
         const createCfOrderRes = await fetch("/api/payment/cashfree/create-order", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             items: checkoutItems,
+            shippingAddress,
             couponCode: appliedCoupon ? appliedCoupon.code : null,
             shippingCost: calculatedDeliveryFee,
+            cityRuleName: selectedCityRule.name,
             idempotencyKey: attemptId,
-            orderId: internalOrderResult.order?.id,
-            orderNumber: internalOrderResult.order_number,
+            userId: user?.id,
+            email: form.email.trim() || user?.email,
             customerDetails: {
               customerId: user?.id,
               name: form.fullName.trim(),
@@ -885,14 +863,14 @@ export default function CheckoutPage() {
           throw new Error(cfOrderData.message || "Failed to initialize Cashfree payment session.");
         }
 
-        // 3. Load Cashfree Web SDK v3
+        // 2. Load Cashfree Web SDK v3
         const mode = cfOrderData.environment === "production" ? "production" : "sandbox";
         const cashfree = await loadCashfreeSdk(mode);
         if (!cashfree) {
           throw new Error("Unable to load Cashfree payment gateway. Please check your internet connection.");
         }
 
-        // 4. Launch Cashfree Web Checkout Modal
+        // 3. Launch Cashfree Web Checkout Modal
         cashfree
           .checkout({
             paymentSessionId: cfOrderData.paymentSessionId,
@@ -913,7 +891,7 @@ export default function CheckoutPage() {
               return;
             }
 
-            // 5. Authoritative Server Verification of Payment Status
+            // 4. Authoritative Server Verification of Payment Status
             try {
               setIsProcessing(true);
               const verifyRes = await fetch("/api/payment/cashfree/verify", {
@@ -923,8 +901,17 @@ export default function CheckoutPage() {
                   cashfreeOrderId: cfOrderData.orderId,
                   orderPayload: {
                     idempotencyKey: attemptId,
-                    orderId: internalOrderResult.order?.id,
-                    orderNumber: internalOrderResult.order_number,
+                    orderId: cfOrderData.internalOrderId,
+                    orderNumber: cfOrderData.internalOrderNumber,
+                    userId: user?.id,
+                    email: form.email.trim() || user?.email,
+                    shippingAddress,
+                    paymentMethod: "ONLINE",
+                    shippingMethod: `${selectedCityRule.name} Delivery`,
+                    shippingCost: calculatedDeliveryFee,
+                    cityRuleName: selectedCityRule.name,
+                    items: checkoutItems,
+                    couponCode: appliedCoupon ? appliedCoupon.code : null,
                   },
                 }),
               });
@@ -946,13 +933,16 @@ export default function CheckoutPage() {
                   ? crypto.randomUUID()
                   : `chk_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
+              const confirmedOrderNum = verifyResult.order_number || cfOrderData.internalOrderNumber || "";
               addToast({
                 title: "Payment Confirmed!",
-                description: `Order ${verifyResult.order_number || internalOrderResult.order_number} confirmed successfully!`,
+                description: confirmedOrderNum
+                  ? `Order ${confirmedOrderNum} confirmed successfully!`
+                  : "Order confirmed successfully!",
                 type: "success",
               });
 
-              router.push(`/checkout/success?order=${verifyResult.order_number || internalOrderResult.order_number}`);
+              router.push(`/checkout/success?order=${confirmedOrderNum}`);
             } catch (verifyErr: unknown) {
               const verifyMsg = verifyErr instanceof Error ? verifyErr.message : undefined;
               console.warn("Cashfree verification response:", verifyErr);

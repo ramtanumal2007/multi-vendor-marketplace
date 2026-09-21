@@ -4,6 +4,7 @@ import {
   createCashfreeOrder,
   getCashfreeEnvironment,
 } from "@/lib/cashfree";
+import { createOrderRecord } from "@/lib/order-service";
 
 export const dynamic = "force-dynamic";
 
@@ -12,14 +13,17 @@ export async function POST(req: Request) {
     const body = await req.json();
     const {
       items = [],
+      shippingAddress,
       couponCode,
       shippingCost,
+      cityRuleName,
       idempotencyKey,
-      orderId,
-      orderNumber,
       customerDetails = {},
+      userId,
+      email,
     } = body;
 
+    // A. Validate Cart Items
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json(
         { success: false, message: "Cart is empty. Cannot initiate payment." },
@@ -27,12 +31,22 @@ export async function POST(req: Request) {
       );
     }
 
+    // B. Validate Delivery Address
+    if (shippingAddress) {
+      if (!shippingAddress.full_name || !shippingAddress.phone || !shippingAddress.city) {
+        return NextResponse.json(
+          { success: false, message: "Incomplete delivery address provided." },
+          { status: 400 }
+        );
+      }
+    }
+
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // 1. Authoritative Product Metadata & Pricing Check from Database
+    // 1. Authoritative Product Metadata & Stock Check from Database
     const productIds = items.map((i: { productId?: string }) => i.productId).filter(Boolean);
     const { data: dbProducts, error: dbProdErr } = await supabase
       .from("products")
@@ -64,7 +78,7 @@ export async function POST(req: Request) {
       (dbProducts as DbProductSummary[]).map((p) => [p.id, p])
     );
 
-    // 2. Authoritative Subtotal Calculation
+    // 2. Authoritative Subtotal Calculation & Stock Revalidation
     let recalculatedSubtotal = 0;
     for (const item of items) {
       const dbP = dbProdMap.get(item.productId);
@@ -74,6 +88,21 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
+
+      // Check stock before contacting payment gateway
+      if (dbP.track_inventory && !dbP.allow_backorders) {
+        const availableStock = dbP.stock_quantity ?? 0;
+        if (availableStock < item.quantity) {
+          return NextResponse.json(
+            {
+              success: false,
+              message: `Insufficient stock for "${dbP.title}". Requested: ${item.quantity}, Available: ${availableStock}.`,
+            },
+            { status: 409 }
+          );
+        }
+      }
+
       const hasDiscount = Boolean(dbP.sale_price && dbP.sale_price > 0 && dbP.sale_price < dbP.price);
       const effectivePrice = hasDiscount ? Number(dbP.sale_price) : Number(dbP.price);
       recalculatedSubtotal += effectivePrice * Number(item.quantity);
@@ -81,6 +110,7 @@ export async function POST(req: Request) {
 
     // 3. Authoritative Coupon Revalidation & Discount Calculation
     let validatedDiscountAmount = 0;
+    let validatedCouponCode: string | null = null;
     if (couponCode && typeof couponCode === "string" && couponCode.trim()) {
       const cleanCode = couponCode.trim().toUpperCase();
       const { data: coupon } = await supabase
@@ -149,6 +179,7 @@ export async function POST(req: Request) {
               validatedDiscountAmount = Math.min(eligibleSubtotal, val);
             }
             validatedDiscountAmount = Math.round(validatedDiscountAmount * 100) / 100;
+            validatedCouponCode = cleanCode;
           }
         }
       }
@@ -198,35 +229,84 @@ export async function POST(req: Request) {
       );
     }
 
-    // 7. Generate Cashfree Order Identifier tied to MY STORE internal order
+    // 7. Generate Unique Cashfree Order Identifier
     const cleanAttemptSuffix = (idempotencyKey || "").replace(/[^a-zA-Z0-9]/g, "").slice(-8);
-    const cleanOrderNum = (orderNumber || `ORD_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, "_");
-    const cfOrderId = `${cleanOrderNum}_${cleanAttemptSuffix || Date.now().toString(36)}`.substring(0, 45);
+    const cfOrderId = `CF_${Date.now().toString(36)}_${cleanAttemptSuffix || Math.random().toString(36).substring(2, 7)}`.substring(0, 45);
 
-    // 8. Create Cashfree Order via Official REST API
+    // 8. Create Cashfree Payment Order FIRST (Server-to-Server)
+    const customerPhone = customerDetails.phone || shippingAddress?.phone || "9999999999";
+    const customerName = customerDetails.name || customerDetails.fullName || shippingAddress?.full_name || "Customer";
+    const customerEmail = customerDetails.email || email || shippingAddress?.email || "customer@store.com";
+    const customerId = customerDetails.customerId || userId || `CUS_${cleanAttemptSuffix || Date.now()}`;
+
     const cfOrder = await createCashfreeOrder({
       orderId: cfOrderId,
       orderAmount: grandTotal,
       orderCurrency: "INR",
       customerDetails: {
-        customer_id: customerDetails.customerId || customerDetails.id || `CUS_${cleanAttemptSuffix || Date.now()}`,
-        customer_name: customerDetails.name || customerDetails.fullName || "Customer",
-        customer_email: customerDetails.email || "customer@store.com",
-        customer_phone: customerDetails.phone || "9999999999",
+        customer_id: String(customerId).substring(0, 50),
+        customer_name: customerName,
+        customer_email: customerEmail,
+        customer_phone: customerPhone,
       },
       orderTags: {
         idempotencyKey: idempotencyKey || "",
-        internalOrderId: orderId || "",
-        internalOrderNumber: orderNumber || "",
+        cfOrderId: cfOrderId,
       },
-      orderNote: `MY STORE Order: ${orderNumber || "Checkout"}`,
+      orderNote: `Online Checkout: ${cleanAttemptSuffix || "Payment"}`,
     });
+
+    if (!cfOrder || !cfOrder.payment_session_id) {
+      return NextResponse.json(
+        { success: false, message: "Cashfree did not return a valid payment session." },
+        { status: 502 }
+      );
+    }
+
+    // 9. ONLY AFTER successful Cashfree order/session creation, create the internal Supabase order
+    let internalOrderResult: {
+      success: boolean;
+      order?: Record<string, unknown>;
+      order_number?: string;
+      invoice_number?: string;
+      message?: string;
+    } | null = null;
+
+    if (shippingAddress) {
+      internalOrderResult = await createOrderRecord({
+        userId: userId || customerDetails.customerId || null,
+        email: customerEmail,
+        shippingAddress,
+        paymentMethod: "ONLINE",
+        paymentStatus: "pending",
+        shippingMethod: `${cityRuleName || "Local"} Delivery`,
+        shippingCost: finalShippingCost,
+        cityRuleName: cityRuleName || "Local",
+        items,
+        couponCode: validatedCouponCode,
+        idempotencyKey: idempotencyKey || null,
+      });
+
+      if (!internalOrderResult.success) {
+        console.error("Internal order reservation failed after Cashfree session creation:", internalOrderResult.message);
+        return NextResponse.json(
+          {
+            success: false,
+            message: internalOrderResult.message || "Failed to finalize order reservation.",
+          },
+          { status: 500 }
+        );
+      }
+    }
 
     return NextResponse.json({
       success: true,
       paymentSessionId: cfOrder.payment_session_id,
       orderId: cfOrder.order_id,
       cfOrderId: cfOrder.cf_order_id,
+      internalOrderId: internalOrderResult?.order?.id || null,
+      internalOrderNumber: internalOrderResult?.order_number || null,
+      invoiceNumber: internalOrderResult?.invoice_number || null,
       environment: getCashfreeEnvironment().toLowerCase(),
       calculatedTotal: grandTotal,
     });

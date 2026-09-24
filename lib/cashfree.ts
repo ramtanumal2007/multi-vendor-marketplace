@@ -86,18 +86,53 @@ export function getCashfreeApiVersion(): string {
 }
 
 /**
+ * Validates that CASHFREE_APP_ID, CASHFREE_SECRET_KEY, and CASHFREE_ENVIRONMENT are configured
+ * and that credential type matches the declared CASHFREE_ENVIRONMENT.
+ * CASHFREE_ENVIRONMENT remains the explicit source of truth:
+ * - If PRODUCTION is declared with TEST keys, an explicit configuration error is thrown.
+ * - If TEST is declared with PRODUCTION keys, an explicit configuration error is thrown.
+ * - Secret keys are never exposed or logged.
+ */
+export function validateCashfreeConfig(): void {
+  const appId = getCashfreeAppId();
+  const secretKey = getCashfreeSecretKey();
+  const env = getCashfreeEnvironment();
+
+  if (!appId || !secretKey) {
+    throw new Error("Cashfree credentials (CASHFREE_APP_ID or CASHFREE_SECRET_KEY) are not configured.");
+  }
+
+  const isTestAppId = appId.toUpperCase().startsWith("TEST");
+  const isTestSecret = secretKey.toLowerCase().startsWith("cfsk_ma_test_");
+  const isProdSecret = secretKey.toLowerCase().startsWith("cfsk_ma_prod_");
+
+  if (env === "PRODUCTION") {
+    if (isTestAppId || isTestSecret) {
+      throw new Error(
+        "Configuration Error: CASHFREE_ENVIRONMENT is set to PRODUCTION, but TEST/Sandbox credentials were provided. Update CASHFREE_ENVIRONMENT to TEST in your environment variables or provide production credentials."
+      );
+    }
+  } else {
+    // env === "TEST"
+    if ((!isTestAppId && appId.length > 0 && !appId.includes("test")) || isProdSecret) {
+      throw new Error(
+        "Configuration Error: CASHFREE_ENVIRONMENT is set to TEST, but PRODUCTION credentials were provided. Update CASHFREE_ENVIRONMENT to PRODUCTION in your environment variables or provide test credentials."
+      );
+    }
+  }
+}
+
+/**
  * Creates a Cashfree payment order server-side and returns payment_session_id
  */
 export async function createCashfreeOrder(
   params: CreateCashfreeOrderParams
 ): Promise<CashfreeOrderResponse> {
+  validateCashfreeConfig();
+
   const appId = getCashfreeAppId();
   const secretKey = getCashfreeSecretKey();
   const baseUrl = getCashfreeBaseUrl();
-
-  if (!appId || !secretKey) {
-    throw new Error("Cashfree credentials (CASHFREE_APP_ID or CASHFREE_SECRET_KEY) are not configured.");
-  }
 
   // Format customer phone: extract 10 digits
   const cleanPhone = (params.customerDetails.customer_phone || "").replace(/\D/g, "").slice(-10);
@@ -169,6 +204,8 @@ export async function createCashfreeOrder(
  * Fetches order details directly from Cashfree server
  */
 export async function fetchCashfreeOrder(orderId: string): Promise<CashfreeOrderResponse> {
+  validateCashfreeConfig();
+
   const appId = getCashfreeAppId();
   const secretKey = getCashfreeSecretKey();
   const baseUrl = getCashfreeBaseUrl();
@@ -199,6 +236,8 @@ export async function fetchCashfreeOrder(orderId: string): Promise<CashfreeOrder
 export async function fetchCashfreeOrderPayments(
   orderId: string
 ): Promise<CashfreePaymentItem[]> {
+  validateCashfreeConfig();
+
   const appId = getCashfreeAppId();
   const secretKey = getCashfreeSecretKey();
   const baseUrl = getCashfreeBaseUrl();

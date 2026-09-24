@@ -10,7 +10,7 @@ export function Footer() {
           {/* Brand */}
           <div className="flex flex-col gap-6">
             <Link href="/" className="font-serif text-2xl font-bold tracking-tight">
-              MY STORE
+              VENDOSMITH
             </Link>
             <p className="text-foreground-secondary text-sm leading-relaxed">
               Elevating everyday essentials through thoughtful design and uncompromising quality.
@@ -44,6 +44,7 @@ export function Footer() {
           {/* Support */}
           <div className="flex flex-col gap-4">
             <h4 className="font-serif text-lg font-medium">Support</h4>
+            <Link href="/support" className="text-sm font-semibold text-accent hover:text-accent-hover transition-colors">Help &amp; Support</Link>
             <Link href="/faq" className="text-sm text-foreground-secondary hover:text-foreground transition-colors">FAQ</Link>
             <Link href="/shipping" className="text-sm text-foreground-secondary hover:text-foreground transition-colors">Shipping Policy</Link>
             <Link href="/returns" className="text-sm text-foreground-secondary hover:text-foreground transition-colors">Returns Policy</Link>
@@ -74,7 +75,7 @@ export function Footer() {
 
         <div className="pt-8 border-t border-border flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-xs text-foreground-secondary">
-            &copy; {new Date().getFullYear()} My Store. All rights reserved.
+            &copy; {new Date().getFullYear()} VENDOSMITH. All rights reserved.
           </p>
           <div className="flex gap-4">
             <Link href="/privacy" className="text-xs text-foreground-secondary hover:text-foreground transition-colors">Privacy Policy</Link>

@@ -901,8 +901,8 @@ export default function CheckoutPage() {
                   cashfreeOrderId: cfOrderData.orderId,
                   orderPayload: {
                     idempotencyKey: attemptId,
-                    orderId: cfOrderData.internalOrderId,
-                    orderNumber: cfOrderData.internalOrderNumber,
+                    orderId: cfOrderData.internalOrderId || null,
+                    orderNumber: cfOrderData.internalOrderNumber || null,
                     userId: user?.id,
                     email: form.email.trim() || user?.email,
                     shippingAddress,

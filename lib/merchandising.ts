@@ -13,6 +13,7 @@ export interface MerchandisedProduct {
   store_id: string;
   product_images?: { image_url: string }[];
   categories?: { id: string; name: string; slug: string };
+  stores?: { id: string; name: string };
   merchandisingScore?: number;
 }
 

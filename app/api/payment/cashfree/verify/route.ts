@@ -85,6 +85,15 @@ export async function POST(req: Request) {
       existingOrder = data;
     }
 
+    if (!existingOrder && paymentReference) {
+      const { data } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("razorpay_payment_id", paymentReference)
+        .maybeSingle();
+      existingOrder = data;
+    }
+
     if (existingOrder) {
       // Idempotent: If already marked paid, return immediately
       if (existingOrder.payment_status === "paid") {
@@ -120,12 +129,13 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Fallback: Atomically Create Order via Server Function if not already created
+    // 3. Atomically Create Order via Server Function after verified payment
     const orderCreateResult = await createOrderRecord({
       ...orderPayload,
       paymentMethod: "ONLINE",
       paymentStatus: "paid",
       paymentReferenceId: paymentReference,
+      idempotencyKey: cleanIdempotencyKey,
     });
 
     if (!orderCreateResult.success) {

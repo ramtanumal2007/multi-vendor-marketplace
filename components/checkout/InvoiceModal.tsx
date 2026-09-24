@@ -169,10 +169,10 @@ export function InvoiceModal({ isOpen, onClose, order, items, customerProfile }:
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold text-lg flex items-center justify-center">
-                    M
+                    V
                   </div>
                   <span className="font-extrabold text-xl tracking-tight text-slate-900 uppercase">
-                    Marketplace Store
+                    VENDOSMITH
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 max-w-xs">

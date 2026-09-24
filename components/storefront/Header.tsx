@@ -36,16 +36,32 @@ interface CategoryItem {
   slug: string;
 }
 
+interface HeaderUser {
+  id: string;
+  email?: string;
+  name?: string | null;
+}
+
 export function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
-  const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
+  const [user, setUser] = useState<HeaderUser | null>(null);
   
   const { itemCount, openDrawer } = useCart();
   const { theme, toggleTheme } = useTheme();
   const supabase = createClient();
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 35);
+    };
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     async function fetchCategories() {
@@ -54,13 +70,35 @@ export function Header() {
     }
     fetchCategories();
 
+    const resolveUserData = async (sbUser: SupabaseUser | null): Promise<HeaderUser | null> => {
+      if (!sbUser) return null;
+      let name = (sbUser.user_metadata?.full_name as string) || (sbUser.user_metadata?.name as string) || null;
+      if (!name) {
+        try {
+          const { data: prof } = await supabase.from("profiles").select("full_name").eq("id", sbUser.id).maybeSingle();
+          if (prof?.full_name) {
+            name = prof.full_name;
+          }
+        } catch {
+          // Ignore profile load errors, fallback to auth user metadata
+        }
+      }
+      return {
+        id: sbUser.id,
+        email: sbUser.email,
+        name: name?.trim() || null,
+      };
+    };
+
     // Check user auth state
-    supabase.auth.getUser().then(({ data }: { data: { user: SupabaseUser | null } }) => {
-      setUser(data?.user ? { id: data.user.id, email: data.user.email } : null);
+    supabase.auth.getUser().then(async ({ data }: { data: { user: SupabaseUser | null } }) => {
+      const resolved = await resolveUserData(data?.user ?? null);
+      setUser(resolved);
     });
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
-      setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
+      const resolved = await resolveUserData(session?.user ?? null);
+      setUser(resolved);
     });
 
     return () => {
@@ -88,10 +126,18 @@ export function Header() {
   return (
     <>
       {/* SINGLE FIXED STOREFRONT HEADER CONTAINER */}
-      <header className="fixed top-0 left-0 right-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col select-none">
+      <header className={`fixed top-0 left-0 right-0 z-40 transition-all duration-300 flex flex-col select-none ${
+        isScrolled 
+          ? "bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-md shadow-slate-950/5 dark:shadow-slate-950/30 border-b border-slate-200/80 dark:border-slate-800/80" 
+          : "bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800"
+      }`}>
         
-        {/* ROW 1: TOP UTILITY BAR (Desktop only, ~38px height) */}
-        <div className="hidden md:flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/95 dark:bg-slate-950/70 px-4 md:px-12 h-[38px] min-h-[38px] text-[12px] text-slate-500 dark:text-slate-400">
+        {/* ROW 1: TOP UTILITY BAR (Desktop only, collapses on scroll) */}
+        <div className={`hidden md:flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/95 dark:bg-slate-950/70 px-4 md:px-12 text-[12px] text-slate-500 dark:text-slate-400 overflow-hidden transition-all duration-300 ${
+          isScrolled 
+            ? "max-h-0 opacity-0 -translate-y-2 py-0 border-none pointer-events-none" 
+            : "max-h-[40px] h-[38px] min-h-[38px] opacity-100"
+        }`}>
           <div className="max-w-[1440px] mx-auto w-full flex items-center justify-between">
             {/* Left Brand Reassurance */}
             <div className="flex items-center gap-4">
@@ -125,7 +171,7 @@ export function Header() {
               </Link>
               <span className="text-slate-300 dark:text-slate-700">|</span>
               <Link 
-                href="/faq" 
+                href="/support" 
                 className="hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1"
               >
                 <HelpCircle className="w-3.5 h-3.5" />
@@ -147,9 +193,11 @@ export function Header() {
           </div>
         </div>
 
-        {/* ROW 2: MAIN MARKETPLACE HEADER (~60px mobile / ~64px desktop) */}
-        <div className="bg-white dark:bg-slate-900 w-full">
-          <div className="mx-auto max-w-[1440px] px-4 md:px-12 h-[60px] md:h-[64px] min-h-[60px] md:min-h-[64px] w-full flex items-center justify-between gap-3 md:gap-6">
+        {/* ROW 2: MAIN MARKETPLACE HEADER (~54px on scroll / ~64px default) */}
+        <div className="bg-transparent w-full transition-all duration-300">
+          <div className={`mx-auto max-w-[1440px] px-4 md:px-12 w-full flex items-center justify-between gap-3 md:gap-6 transition-all duration-300 ${
+            isScrolled ? "h-[54px] md:h-[58px] min-h-[54px] md:min-h-[58px]" : "h-[60px] md:h-[64px] min-h-[60px] md:min-h-[64px]"
+          }`}>
             
             {/* Left Section: Logo + Subtitle (LOCKED TOGETHER) + Deliver to Location */}
             <div className="flex items-center gap-3 md:gap-5 shrink-0">
@@ -167,8 +215,8 @@ export function Header() {
                 href="/" 
                 className="flex flex-col shrink-0 py-0.5 select-none group"
               >
-                <span className="font-serif text-2xl md:text-[26px] font-black tracking-tight text-foreground whitespace-nowrap leading-none group-hover:opacity-90 transition-opacity">
-                  MY STORE
+                <span className="font-serif text-2xl md:text-[26px] font-black tracking-tight text-slate-950 dark:text-white whitespace-nowrap leading-none group-hover:opacity-90 transition-opacity">
+                  VENDOSMITH
                 </span>
                 <span className="text-[9px] font-bold tracking-[0.2em] text-accent uppercase leading-none mt-1">
                   MARKETPLACE
@@ -243,7 +291,7 @@ export function Header() {
                 >
                   <User className="w-5 h-5 text-slate-700 dark:text-slate-300" />
                   <span className="hidden lg:inline text-xs font-semibold">
-                    {user ? (user.email?.split("@")[0] || "Account") : "Sign In"}
+                    {user ? (user.name ? user.name.trim().split(/\s+/)[0] : (user.email?.split("@")[0] || "Account")) : "Sign In"}
                   </span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden lg:block" />
                 </button>
@@ -255,8 +303,13 @@ export function Header() {
                       <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40">
                         <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Account</p>
                         <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate mt-0.5">
-                          {user?.email || "Guest Visitor"}
+                          {user?.name || (user?.email ? user.email.split("@")[0] : "Guest Visitor")}
                         </p>
+                        {user?.email && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5 font-normal">
+                            {user.email}
+                          </p>
+                        )}
                       </div>
 
                       <nav className="py-1 text-xs font-medium">
@@ -320,12 +373,12 @@ export function Header() {
                         </Link>
 
                         <Link
-                          href="/faq"
+                          href="/support"
                           onClick={() => setIsAccountMenuOpen(false)}
                           className="flex items-center gap-2.5 px-4 py-2.5 text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         >
                           <HelpCircle className="w-4 h-4 text-slate-500" />
-                          Help &amp; FAQ
+                          Help &amp; Support
                         </Link>
                       </nav>
 
@@ -348,6 +401,7 @@ export function Header() {
               {/* Cart Trigger */}
               <button
                 onClick={openDrawer}
+                id="header-cart-button"
                 className="flex items-center gap-2 p-2 sm:px-3 sm:py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors relative text-slate-800 dark:text-slate-200"
                 aria-label="View shopping cart"
               >
@@ -356,9 +410,12 @@ export function Header() {
                   <AnimatePresence>
                     {itemCount > 0 && (
                       <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
+                        key={itemCount}
+                        initial={{ scale: 0.6 }}
+                        animate={{ scale: [1, 1.35, 1] }}
                         exit={{ scale: 0 }}
+                        transition={{ duration: 0.35, ease: "easeOut" }}
+                        id="header-cart-badge"
                         className="absolute -top-1.5 -right-2 min-w-[18px] h-[18px] px-1 bg-accent text-white text-[10px] font-bold flex items-center justify-center rounded-full shadow-xs"
                       >
                         {itemCount}
@@ -386,8 +443,8 @@ export function Header() {
             className="fixed inset-0 z-50 bg-background md:hidden flex flex-col"
           >
             <div className="h-[70px] px-6 flex items-center justify-between border-b border-border bg-background">
-              <Link href="/" className="font-serif text-2xl font-bold tracking-tight" onClick={() => setIsMobileMenuOpen(false)}>
-                MY STORE
+              <Link href="/" className="font-serif text-2xl font-bold tracking-tight text-slate-950 dark:text-white" onClick={() => setIsMobileMenuOpen(false)}>
+                VENDOSMITH
               </Link>
               <div className="flex items-center gap-2">
                 {user?.id && (
@@ -432,13 +489,19 @@ export function Header() {
               {user ? (
                 <div className="flex flex-col gap-2 p-3 bg-background-secondary/60 rounded-xl border border-border">
                   <span className="text-[10px] font-bold text-foreground-secondary uppercase tracking-wider">My Account</span>
-                  <Link href="/account" className="text-sm font-medium text-foreground" onClick={() => setIsMobileMenuOpen(false)}>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-foreground truncate">{user.name || (user.email ? user.email.split("@")[0] : "Account")}</span>
+                    {user.email && (
+                      <span className="text-xs text-foreground-secondary truncate">{user.email}</span>
+                    )}
+                  </div>
+                  <Link href="/account" className="text-sm font-medium text-foreground hover:text-accent" onClick={() => setIsMobileMenuOpen(false)}>
                     Dashboard
                   </Link>
-                  <Link href="/account/orders" className="text-sm font-medium text-foreground" onClick={() => setIsMobileMenuOpen(false)}>
+                  <Link href="/account/orders" className="text-sm font-medium text-foreground hover:text-accent" onClick={() => setIsMobileMenuOpen(false)}>
                     My Orders
                   </Link>
-                  <Link href="/wishlist" className="text-sm font-medium text-foreground" onClick={() => setIsMobileMenuOpen(false)}>
+                  <Link href="/wishlist" className="text-sm font-medium text-foreground hover:text-accent" onClick={() => setIsMobileMenuOpen(false)}>
                     Wishlist
                   </Link>
                 </div>

@@ -16,6 +16,7 @@ import {
   Loader2,
   ArrowRight,
   Package,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useCart } from "@/lib/context/CartContext";
@@ -79,6 +80,8 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
   const [product, setProduct] = useState<DetailedProduct | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isBuyNowLoading, setIsBuyNowLoading] = useState(false);
+  const [isAddingToCart, setIsAddingToCart] = useState(false);
+  const [isAdded, setIsAdded] = useState(false);
 
   const [relatedProducts, setRelatedProducts] = useState<RelatedProductItem[]>([]);
   const [isRelatedLoading, setIsRelatedLoading] = useState(true);
@@ -186,10 +189,10 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
     }
 
     fetchRelatedProducts();
-  }, [product?.id, product?.category_id, supabase]);
+  }, [product, supabase]);
 
   const handleAddToCartWithCorrectPrice = () => {
-    if (!product) return;
+    if (!product || isAddingToCart) return;
 
     // Stock Validation
     if (product.track_inventory && product.stock_quantity !== null && product.stock_quantity !== undefined) {
@@ -208,51 +211,91 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
     );
     const effectivePrice = hasDiscount ? (product.sale_price as number) : product.price;
 
-    addItem(
-      {
-        id: product.id,
-        productId: product.id,
-        title: product.title,
-        price: effectivePrice,
-        mrp: product.price,
-        image: product.product_images?.[0]?.image_url || "",
-        variantInfo: undefined,
-      },
-      quantity
-    );
+    const cartPayload = {
+      id: product.id,
+      productId: product.id,
+      title: product.title,
+      price: effectivePrice,
+      mrp: product.price,
+      image: product.product_images?.[0]?.image_url || "",
+      variantInfo: undefined,
+    };
 
-    if (productImageRef.current && product.product_images?.[0]?.image_url) {
-      const rect = productImageRef.current.getBoundingClientRect();
+    // STEP 1: Button immediately changes (0-250ms)
+    setIsAddingToCart(true);
+
+    // STEP 2: Subtle flying-product animation from product image toward the cart icon (250-700ms)
+    const productImgEl = productImageRef.current;
+    const cartButton = document.getElementById("header-cart-button") || document.querySelector('button[aria-label="View shopping cart"]');
+
+    if (productImgEl && product.product_images?.[0]?.image_url) {
+      const rect = productImgEl.getBoundingClientRect();
+      const cartRect = cartButton?.getBoundingClientRect();
+
       const ghost = document.createElement("img");
       ghost.src = product.product_images[0].image_url;
       ghost.style.position = "fixed";
-      ghost.style.left = `${rect.left}px`;
-      ghost.style.top = `${rect.top}px`;
-      ghost.style.width = `${rect.width}px`;
-      ghost.style.height = `${rect.height}px`;
+      ghost.style.left = `${rect.left + rect.width / 4}px`;
+      ghost.style.top = `${rect.top + rect.height / 4}px`;
+      ghost.style.width = `${Math.min(rect.width / 2, 160)}px`;
+      ghost.style.height = `${Math.min(rect.height / 2, 160)}px`;
       ghost.style.objectFit = "cover";
-      ghost.style.borderRadius = "8px";
+      ghost.style.borderRadius = "14px";
+      ghost.style.boxShadow = "0 10px 25px rgba(0,0,0,0.25)";
       ghost.style.zIndex = "9999";
-      ghost.style.transition = "all 0.8s cubic-bezier(0.25, 1, 0.5, 1)";
+      ghost.style.pointerEvents = "none";
+      ghost.style.transition = "all 0.55s cubic-bezier(0.2, 0.8, 0.2, 1)";
       document.body.appendChild(ghost);
 
-      requestAnimationFrame(() => {
-        ghost.style.transform = "scale(0.1) rotate(10deg)";
-        ghost.style.left = `calc(100vw - 100px)`;
-        ghost.style.top = `30px`;
-        ghost.style.opacity = "0";
-      });
+      // Start flight toward cart icon
+      setTimeout(() => {
+        const destX = cartRect ? cartRect.left + cartRect.width / 2 - 20 : window.innerWidth - 70;
+        const destY = cartRect ? cartRect.top + cartRect.height / 2 - 20 : 25;
+        ghost.style.transform = "scale(0.15) rotate(12deg)";
+        ghost.style.left = `${destX}px`;
+        ghost.style.top = `${destY}px`;
+        ghost.style.opacity = "0.2";
+      }, 150);
+
+      // STEP 3: Reaches cart at ~700ms: trigger badge increment & show "Added to Cart ✓"
+      setTimeout(() => {
+        if (document.body.contains(ghost)) {
+          document.body.removeChild(ghost);
+        }
+        // Add item to cart without immediate drawer open
+        addItem(cartPayload, quantity, false);
+        setIsAddingToCart(false);
+        setIsAdded(true);
+      }, 700);
+
+      // STEP 4: ONLY AFTER THE SUCCESS ANIMATION HAS BEEN VISIBLE (~1000ms), open cart drawer
+      setTimeout(() => {
+        openDrawer();
+      }, 1000);
+
+      // Reset button state
+      setTimeout(() => {
+        setIsAdded(false);
+      }, 2500);
+    } else {
+      // Fallback if image element unavailable
+      setTimeout(() => {
+        addItem(cartPayload, quantity, false);
+        setIsAddingToCart(false);
+        setIsAdded(true);
+      }, 400);
 
       setTimeout(() => {
-        document.body.removeChild(ghost);
         openDrawer();
-      }, 800);
-    } else {
-      openDrawer();
+      }, 1000);
+
+      setTimeout(() => {
+        setIsAdded(false);
+      }, 2500);
     }
   };
 
-  // Buy Now Handler (Phase 2 & Fix)
+  // Buy Now Handler with Premium Animation
   const handleBuyNow = (e: React.MouseEvent) => {
     e.preventDefault();
     if (!product || isBuyNowLoading) return;
@@ -269,6 +312,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
       }
     }
 
+    // Immediately enter loading state to prevent double clicks and animate button
     setIsBuyNowLoading(true);
 
     const hasDiscount = Boolean(
@@ -290,18 +334,21 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
     setBuyNowItem(buyItem);
     closeDrawer();
 
-    // Authentication Check & Redirect
-    if (!authLoading && !user) {
-      addToast({
-        title: "Sign in to Checkout",
-        description: "Please log in to complete your order.",
-        type: "info",
-      });
-      router.push(`/login?redirect=${encodeURIComponent("/checkout?mode=buy_now")}`);
-      return;
-    }
+    // Show subtle progress/feedback for ~600-800ms before navigating
+    setTimeout(() => {
+      // Authentication Check & Redirect
+      if (!authLoading && !user) {
+        addToast({
+          title: "Sign in to Checkout",
+          description: "Please log in to complete your order.",
+          type: "info",
+        });
+        router.push(`/login?redirect=${encodeURIComponent("/checkout?mode=buy_now")}`);
+        return;
+      }
 
-    router.push("/checkout?mode=buy_now");
+      router.push("/checkout?mode=buy_now");
+    }, 650);
   };
 
   if (isLoading) {
@@ -466,30 +513,78 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
           </div>
 
           {/* Desktop Action Buttons: Add to Cart & Buy Now */}
-          <div className="hidden md:grid grid-cols-2 gap-4 mb-8">
-            <Button
-              variant="outline"
-              size="lg"
-              className="h-14 text-base font-bold border-2 border-accent text-accent hover:bg-accent/10 transition-all flex items-center justify-center gap-2"
-              onClick={handleAddToCartWithCorrectPrice}
-            >
-              <ShoppingBag className="w-5 h-5" /> Add to Cart
-            </Button>
+          <div className="hidden md:flex flex-col gap-3 mb-8">
+            <div className="grid grid-cols-2 gap-4">
+              <Button
+                variant="outline"
+                size="lg"
+                disabled={isAddingToCart}
+                className={`h-14 text-base font-bold transition-all flex items-center justify-center gap-2 relative overflow-hidden ${
+                  isAdded
+                    ? "border-2 border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 scale-[1.01] shadow-sm"
+                    : isAddingToCart
+                    ? "border-2 border-accent bg-accent/5 text-accent cursor-wait"
+                    : "border-2 border-accent text-accent hover:bg-accent/10 active:scale-[0.98]"
+                }`}
+                onClick={handleAddToCartWithCorrectPrice}
+              >
+                {isAdded ? (
+                  <>
+                    <Check className="w-5 h-5 text-emerald-600 dark:text-emerald-400 animate-in zoom-in-75 duration-200" />
+                    <span>Added to Cart ✓</span>
+                  </>
+                ) : isAddingToCart ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin text-accent" />
+                    <span>Adding...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShoppingBag className="w-5 h-5" />
+                    <span>Add to Cart</span>
+                  </>
+                )}
+              </Button>
 
-            <Button
-              variant="primary"
-              size="lg"
-              disabled={isBuyNowLoading || Boolean(product.track_inventory && (product.stock_quantity ?? 0) <= 0)}
-              className="h-14 text-base font-bold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all bg-gradient-to-r from-amber-600 to-orange-600 text-white border-none flex items-center justify-center gap-2 disabled:opacity-50"
-              onClick={handleBuyNow}
-            >
-              {isBuyNowLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Zap className="w-5 h-5 fill-current" />
+              <Button
+                variant="primary"
+                size="lg"
+                disabled={isBuyNowLoading || Boolean(product.track_inventory && (product.stock_quantity ?? 0) <= 0)}
+                className={`h-14 text-base font-bold shadow-lg hover:shadow-xl hover:shadow-amber-500/20 active:scale-[0.98] transition-all bg-gradient-to-r from-amber-600 to-orange-600 text-white border-none flex items-center justify-center gap-2 relative overflow-hidden disabled:opacity-50 ${
+                  isBuyNowLoading ? "cursor-wait" : "hover:-translate-y-0.5"
+                }`}
+                onClick={handleBuyNow}
+              >
+                {isBuyNowLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Preparing Checkout...</span>
+                    {/* Subtle Progress Bar */}
+                    <div className="absolute bottom-0 left-0 h-1 bg-white/40 animate-pulse w-full" />
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-5 h-5 fill-current" />
+                    <span>Buy Now — {formatCurrency(effectivePrice * quantity)}</span>
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Subtle Instant Checkout Transition Badge */}
+            <AnimatePresence>
+              {isBuyNowLoading && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-semibold"
+                >
+                  <ArrowRight className="w-3.5 h-3.5 animate-pulse" />
+                  <span>Preparing your instant checkout...</span>
+                </motion.div>
               )}
-              Buy Now — {formatCurrency(effectivePrice * quantity)}
-            </Button>
+            </AnimatePresence>
           </div>
 
           {/* Dynamic Delivery & Serviceability Information */}
@@ -684,22 +779,63 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
       </section>
 
       {/* Sticky Mobile Add to Cart & Buy Now Bar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-background border-t border-border p-3 shadow-[0_-4px_20px_rgba(0,0,0,0.15)] z-40 flex items-center gap-2">
-        <Button
-          variant="outline"
-          className="flex-1 h-12 text-xs font-bold border-accent text-accent"
-          onClick={handleAddToCartWithCorrectPrice}
-        >
-          Add to Cart
-        </Button>
-        <Button
-          variant="primary"
-          disabled={isBuyNowLoading || Boolean(product.track_inventory && (product.stock_quantity ?? 0) <= 0)}
-          className="flex-1 h-12 text-xs font-bold bg-gradient-to-r from-amber-600 to-orange-600 text-white border-none shadow-md"
-          onClick={handleBuyNow}
-        >
-          {isBuyNowLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Buy Now"}
-        </Button>
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-background border-t border-border p-3 shadow-[0_-4px_20px_rgba(0,0,0,0.15)] z-40 flex flex-col gap-2">
+        <AnimatePresence>
+          {isBuyNowLoading && (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center justify-center gap-1.5 py-1 px-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-[11px] font-semibold"
+            >
+              <ArrowRight className="w-3 h-3 animate-pulse" />
+              <span>Preparing your instant checkout...</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            disabled={isAddingToCart}
+            className={`flex-1 h-12 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              isAdded
+                ? "border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400"
+                : isAddingToCart
+                ? "border-accent bg-accent/5 text-accent cursor-wait"
+                : "border-accent text-accent active:scale-95"
+            }`}
+            onClick={handleAddToCartWithCorrectPrice}
+          >
+            {isAdded ? (
+              <>
+                <Check className="w-4 h-4 animate-in zoom-in-75 duration-200" />
+                <span>Added ✓</span>
+              </>
+            ) : isAddingToCart ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Adding...</span>
+              </>
+            ) : (
+              <span>Add to Cart</span>
+            )}
+          </Button>
+          <Button
+            variant="primary"
+            disabled={isBuyNowLoading || Boolean(product.track_inventory && (product.stock_quantity ?? 0) <= 0)}
+            className="flex-1 h-12 text-xs font-bold bg-gradient-to-r from-amber-600 to-orange-600 text-white border-none shadow-md active:scale-95 transition-transform relative overflow-hidden"
+            onClick={handleBuyNow}
+          >
+            {isBuyNowLoading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Preparing...</span>
+              </>
+            ) : (
+              <span>Buy Now — {formatCurrency(effectivePrice * quantity)}</span>
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   );

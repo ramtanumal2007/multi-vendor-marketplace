@@ -16,7 +16,7 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: "Premium E-Commerce",
+  title: "VENDOSMITH",
   description: "A premium e-commerce experience.",
 };
 

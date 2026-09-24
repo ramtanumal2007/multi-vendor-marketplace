@@ -4,7 +4,6 @@ import {
   createCashfreeOrder,
   getCashfreeEnvironment,
 } from "@/lib/cashfree";
-import { createOrderRecord } from "@/lib/order-service";
 
 export const dynamic = "force-dynamic";
 
@@ -213,7 +212,7 @@ export async function POST(req: Request) {
     recalculatedTax = Math.round(recalculatedTax * 100) / 100;
 
     // 5. Authoritative Shipping Fee Calculation
-    let finalShippingCost = Number(shippingCost || 40);
+    let finalShippingCost = shippingCost !== undefined && shippingCost !== null ? Number(shippingCost) : 40;
     if (recalculatedSubtotal >= freeThreshold && freeThreshold > 0) {
       finalShippingCost = 0;
     }
@@ -224,7 +223,11 @@ export async function POST(req: Request) {
 
     if (grandTotal < 1) {
       return NextResponse.json(
-        { success: false, message: "Order total is below minimum payable amount." },
+        {
+          success: false,
+          message:
+            "Cashfree requires a minimum payable amount of ₹1.00 for online payment gateway transactions. Please select Cash on Delivery (COD) or add items to your cart.",
+        },
         { status: 400 }
       );
     }
@@ -252,6 +255,8 @@ export async function POST(req: Request) {
       orderTags: {
         idempotencyKey: idempotencyKey || "",
         cfOrderId: cfOrderId,
+        couponCode: validatedCouponCode || "",
+        cityRuleName: cityRuleName || "",
       },
       orderNote: `Online Checkout: ${cleanAttemptSuffix || "Payment"}`,
     });
@@ -263,50 +268,11 @@ export async function POST(req: Request) {
       );
     }
 
-    // 9. ONLY AFTER successful Cashfree order/session creation, create the internal Supabase order
-    let internalOrderResult: {
-      success: boolean;
-      order?: Record<string, unknown>;
-      order_number?: string;
-      invoice_number?: string;
-      message?: string;
-    } | null = null;
-
-    if (shippingAddress) {
-      internalOrderResult = await createOrderRecord({
-        userId: userId || customerDetails.customerId || null,
-        email: customerEmail,
-        shippingAddress,
-        paymentMethod: "ONLINE",
-        paymentStatus: "pending",
-        shippingMethod: `${cityRuleName || "Local"} Delivery`,
-        shippingCost: finalShippingCost,
-        cityRuleName: cityRuleName || "Local",
-        items,
-        couponCode: validatedCouponCode,
-        idempotencyKey: idempotencyKey || null,
-      });
-
-      if (!internalOrderResult.success) {
-        console.error("Internal order reservation failed after Cashfree session creation:", internalOrderResult.message);
-        return NextResponse.json(
-          {
-            success: false,
-            message: internalOrderResult.message || "Failed to finalize order reservation.",
-          },
-          { status: 500 }
-        );
-      }
-    }
-
     return NextResponse.json({
       success: true,
       paymentSessionId: cfOrder.payment_session_id,
       orderId: cfOrder.order_id,
       cfOrderId: cfOrder.cf_order_id,
-      internalOrderId: internalOrderResult?.order?.id || null,
-      internalOrderNumber: internalOrderResult?.order_number || null,
-      invoiceNumber: internalOrderResult?.invoice_number || null,
       environment: getCashfreeEnvironment().toLowerCase(),
       calculatedTotal: grandTotal,
     });

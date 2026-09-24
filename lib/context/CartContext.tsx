@@ -22,7 +22,7 @@ interface CartContextType {
   subtotal: number;
   openDrawer: () => void;
   closeDrawer: () => void;
-  addItem: (item: Omit<CartItem, "quantity">, quantityToAdd?: number) => void;
+  addItem: (item: Omit<CartItem, "quantity">, quantityToAdd?: number, openCartDrawer?: boolean) => void;
   setBuyNowItem: (item: CartItem | null) => void;
   clearBuyNowItem: () => void;
   removeItem: (id: string) => void;
@@ -174,7 +174,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Add Item to Cart (Guest & Authenticated friendly - never forces login on add)
-  const addItem = (newItem: Omit<CartItem, "quantity">, quantityToAdd = 1) => {
+  const addItem = (newItem: Omit<CartItem, "quantity">, quantityToAdd = 1, openCartDrawer = true) => {
     const itemWithMrp: CartItem = {
       ...newItem,
       quantity: quantityToAdd,
@@ -195,7 +195,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       return [...prev, itemWithMrp];
     });
 
-    openDrawer();
+    if (openCartDrawer) {
+      openDrawer();
+    }
   };
 
   const removeItem = (id: string) => {

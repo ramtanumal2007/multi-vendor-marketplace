@@ -298,7 +298,7 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
   recalculatedTax = Math.round(recalculatedTax * 100) / 100;
 
   // 5. Server-side Shipping Fee Calculation
-  let finalShippingCost = Number(shippingCost || 40);
+  let finalShippingCost = shippingCost !== undefined && shippingCost !== null ? Number(shippingCost) : 40;
   if (recalculatedSubtotal >= freeThreshold && freeThreshold > 0) {
     finalShippingCost = 0;
   }

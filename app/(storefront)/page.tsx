@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -8,29 +8,30 @@ import {
   ArrowRight, 
   ChevronLeft, 
   ChevronRight, 
-  Star, 
   ShieldCheck, 
   Truck, 
   RefreshCw, 
   Zap, 
-  TrendingUp, 
   Sparkles,
-  Tag,
-  Clock,
-  Flame,
-  Award
+  Shirt,
+  Apple,
+  Home,
+  HeartHandshake,
+  Footprints,
+  Dumbbell,
+  Smartphone,
+  CheckCircle2,
+  Package
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ProductCard } from "@/components/ui/ProductCard";
-import { ProductCarousel } from "@/components/storefront/ProductCarousel";
 import { createClient } from "@/lib/supabase";
 import { useToast } from "@/components/ui/Toast";
 import { useCart } from "@/lib/context/CartContext";
 import { 
   fetchMerchandisingSignals, 
   rankProducts, 
-  MerchandisedProduct, 
-  SectionMerchandisingRule 
+  MerchandisedProduct 
 } from "@/lib/merchandising";
 
 interface HeroSlide {
@@ -43,14 +44,6 @@ interface HeroSlide {
   cta_link: string;
   sort_order: number;
   is_active: boolean;
-}
-
-interface Category {
-  id: string;
-  name: string;
-  slug: string;
-  image_url?: string;
-  sort_order?: number;
 }
 
 interface SpecialCollectionCard {
@@ -66,45 +59,132 @@ interface SpotlightCard {
   image: string;
   link: string;
   badge: string;
-  bgGradient: string;
 }
 
 interface HomepageConfig {
   special_collection?: {
+    is_active: boolean;
     title: string;
     subtitle: string;
-    banner_url: string;
-    is_active: boolean;
+    badge: string;
     cards: SpecialCollectionCard[];
   };
   in_the_spotlight?: {
+    is_active: boolean;
     title: string;
     subtitle: string;
-    is_active: boolean;
     cards: SpotlightCard[];
   };
-  section_rules?: Record<string, SectionMerchandisingRule>;
 }
 
-interface CategoryProductGroup {
-  category: Category;
-  products: MerchandisedProduct[];
+// Fallback Hero Slides
+const FALLBACK_HERO_SLIDES: HeroSlide[] = [
+  {
+    id: "default-1",
+    heading: "The Festival Mega Carnival",
+    subheading: "Flat 40%–70% off across verified local & national brands.",
+    cta_text: "Shop Carnival Deals",
+    cta_link: "/products",
+    image_url: "https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=1600&q=80",
+    sort_order: 1,
+    is_active: true,
+  },
+  {
+    id: "default-2",
+    heading: "Next-Gen Tech & Electronics",
+    subheading: "Noise-cancelling headphones, smart wearables & creator gear.",
+    cta_text: "Explore Tech Hub",
+    cta_link: "/categories/electronics",
+    image_url: "https://images.unsplash.com/photo-1550009158-9ebf69173e03?w=1600&q=80",
+    sort_order: 2,
+    is_active: true,
+  },
+  {
+    id: "default-3",
+    heading: "Authentic Designer Apparel",
+    subheading: "Curated Indian textiles, luxury western & streetwear.",
+    cta_text: "Discover Fashion",
+    cta_link: "/categories/mens-fashion",
+    image_url: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1600&q=80",
+    sort_order: 3,
+    is_active: true,
+  },
+];
+
+// Curated Category Showcase (8 Premium Departments)
+const MARKETPLACE_CATEGORIES = [
+  {
+    name: "Men's Fashion",
+    slug: "mens-fashion",
+    icon: Shirt,
+    description: "Apparel, formals & everyday",
+    image: "https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=600&q=80",
+  },
+  {
+    name: "Women's Fashion",
+    slug: "womens-fashion",
+    icon: Sparkles,
+    description: "Ethnic, western & couture",
+    image: "https://images.unsplash.com/photo-1525507119028-ed4c629a60a3?w=600&q=80",
+  },
+  {
+    name: "Electronics & Gadgets",
+    slug: "electronics",
+    icon: Smartphone,
+    description: "Audio, phones & smart tech",
+    image: "https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=600&q=80",
+  },
+  {
+    name: "Grocery & Food",
+    slug: "grocery-food",
+    icon: Apple,
+    description: "Daily staples, snacks & fresh",
+    image: "https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&q=80",
+  },
+  {
+    name: "Home & Living",
+    slug: "home-living",
+    icon: Home,
+    description: "Decor, essentials & kitchen",
+    image: "https://images.unsplash.com/photo-1513694203232-719a280e022f?w=600&q=80",
+  },
+  {
+    name: "Beauty & Personal Care",
+    slug: "beauty",
+    icon: HeartHandshake,
+    description: "Skincare, wellness & scents",
+    image: "https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=600&q=80",
+  },
+  {
+    name: "Footwear",
+    slug: "footwear",
+    icon: Footprints,
+    description: "Sneakers, formals & comfort",
+    image: "https://images.unsplash.com/photo-1549298916-b41d501d3772?w=600&q=80",
+  },
+  {
+    name: "Sports & Fitness",
+    slug: "sports-fitness",
+    icon: Dumbbell,
+    description: "Activewear, gear & training",
+    image: "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=600&q=80",
+  },
+];
+
+type DiscoverTabId = "trending" | "new_arrivals" | "best_sellers" | "recommended";
+
+interface DiscoverTabMeta {
+  id: DiscoverTabId;
+  label: string;
+  icon: string;
 }
 
-const CATEGORY_IMAGE_FALLBACKS: Record<string, string> = {
-  "electronics": "https://images.unsplash.com/photo-1498049794561-7780e7231661?w=400&q=80",
-  "mens-fashion": "https://images.unsplash.com/photo-1490578474895-699cd4e2cf59?w=400&q=80",
-  "womens-fashion": "https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?w=400&q=80",
-  "home-living": "https://images.unsplash.com/photo-1513694203232-719a280e022f?w=400&q=80",
-  "beauty-care": "https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=400&q=80",
-  "footwear": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80",
-  "accessories": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&q=80",
-  "sports-fitness": "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=400&q=80",
-  "toys-baby": "https://images.unsplash.com/photo-1566576912321-d58ddd7a6088?w=400&q=80",
-  "hand-craft": "https://images.unsplash.com/photo-1578749556568-bc2c40e68b61?w=400&q=80",
-  "grocery-food": "https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&q=80",
-  "books-stationery": "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&q=80",
-};
+const DISCOVER_TABS: DiscoverTabMeta[] = [
+  { id: "trending", label: "Trending", icon: "🔥" },
+  { id: "new_arrivals", label: "New Arrivals", icon: "✨" },
+  { id: "best_sellers", label: "Best Sellers", icon: "🏆" },
+  { id: "recommended", label: "Recommended", icon: "💡" },
+];
 
 export default function Homepage() {
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -114,17 +194,15 @@ export default function Homepage() {
   
   // Data States
   const [heroSlides, setHeroSlides] = useState<HeroSlide[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [dealsOfDay, setDealsOfDay] = useState<MerchandisedProduct[]>([]);
-  const [topSelection, setTopSelection] = useState<MerchandisedProduct[]>([]);
   const [trendingNow, setTrendingNow] = useState<MerchandisedProduct[]>([]);
-  const [categoryProductGroups, setCategoryProductGroups] = useState<CategoryProductGroup[]>([]);
+  const [newArrivals, setNewArrivals] = useState<MerchandisedProduct[]>([]);
+  const [bestSellers, setBestSellers] = useState<MerchandisedProduct[]>([]);
+  const [recommended, setRecommended] = useState<MerchandisedProduct[]>([]);
   const [homepageConfig, setHomepageConfig] = useState<HomepageConfig | null>(null);
-  
-  // Auth & Personalization state
-  const [userName, setUserName] = useState<string | null>(null);
-  const [personalizedProducts, setPersonalizedProducts] = useState<MerchandisedProduct[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Discover Products Tab Selection
+  const [activeDiscoverTab, setActiveDiscoverTab] = useState<DiscoverTabId>("trending");
 
   // Auto slide timer for hero banner
   useEffect(() => {
@@ -135,49 +213,30 @@ export default function Homepage() {
     return () => clearInterval(timer);
   }, [heroSlides.length]);
 
-  // Fetch Homepage Data from Supabase
+  // Fetch Homepage Data from Supabase with Strict Deduplication
   useEffect(() => {
     async function fetchHomepageData() {
       setIsLoading(true);
 
-      // Check current logged in user
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("full_name")
-          .eq("id", session.user.id)
-          .single();
-        if (profile?.full_name) {
-          setUserName(profile.full_name.split(" ")[0]);
-        }
-      }
-
-      // Parallel data fetching from Supabase
       const [
         heroRes,
-        catsRes,
         productsRes,
         configRes
       ] = await Promise.all([
         supabase.from("hero_slides").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
-        supabase.from("categories").select("*").order("sort_order", { ascending: true }),
-        supabase.from("products").select("*, product_images(image_url), categories(id, name, slug)").eq("status", "active").order("created_at", { ascending: false }).limit(40),
+        supabase.from("products").select("*, product_images(image_url), categories(id, name, slug), stores(id, name)").eq("status", "active").order("created_at", { ascending: false }).limit(40),
         supabase.from("page_seo").select("meta_description").eq("page_slug", "homepage_config").single()
       ]);
 
       if (heroRes.data && heroRes.data.length > 0) {
         setHeroSlides(heroRes.data);
+      } else {
+        setHeroSlides(FALLBACK_HERO_SLIDES);
       }
 
-      if (catsRes.data) {
-        setCategories(catsRes.data);
-      }
-
-      let parsedConfig: HomepageConfig | null = null;
       if (configRes.data?.meta_description) {
         try {
-          parsedConfig = JSON.parse(configRes.data.meta_description);
+          const parsedConfig = JSON.parse(configRes.data.meta_description);
           setHomepageConfig(parsedConfig);
         } catch (e) {
           console.error("Error parsing homepage_config:", e);
@@ -188,52 +247,41 @@ export default function Homepage() {
         const allProducts = productsRes.data as MerchandisedProduct[];
         const productIds = allProducts.map((p) => p.id);
 
-        // Fetch real ranking signals (sales, reviews, wishlist counts)
+        // Fetch real ranking signals
         const signalsMap = await fetchMerchandisingSignals(supabase, productIds);
 
-        // Section Rules from Admin Config or default
-        const rules = parsedConfig?.section_rules || {};
+        // Smart Strict Deduplication: No product ID repeats across tabs!
+        const usedIds = new Set<string>();
 
-        // 1. Deals of the Day ranking
-        const dealsRanked = rankProducts(allProducts, signalsMap, "deals", {
-          min_discount: 5,
-          max_products: 10,
-          ...rules["deals"]
-        });
-        setDealsOfDay(dealsRanked.length > 0 ? dealsRanked : allProducts.slice(0, 8));
+        // 1. 🔥 Trending: High order velocity / signals
+        const trendingRanked = rankProducts(allProducts, signalsMap, "trending", { max_products: 8 });
+        const resolvedTrending = trendingRanked.length > 0 ? trendingRanked.slice(0, 8) : allProducts.slice(0, 8);
+        resolvedTrending.forEach((p) => usedIds.add(p.id));
+        setTrendingNow(resolvedTrending);
 
-        // 2. Trending Now ranking
-        const trendingRanked = rankProducts(allProducts, signalsMap, "trending", {
-          max_products: 10,
-          ...rules["trending"]
-        });
-        setTrendingNow(trendingRanked);
-
-        // 3. Top Selection ranking
-        const topRanked = rankProducts(allProducts, signalsMap, "top_selection", {
-          max_products: 8,
-          ...rules["top_selection"]
-        });
-        setTopSelection(topRanked);
-
-        // 4. Personalized Products
-        setPersonalizedProducts(trendingRanked.slice(0, 8));
-
-        // 5. Category-wise product rows ranking
-        if (catsRes.data) {
-          const groups: CategoryProductGroup[] = [];
-          catsRes.data.forEach((cat: Category) => {
-            const catProducts = allProducts.filter((p) => p.category_id === cat.id);
-            if (catProducts.length > 0) {
-              const rankedCatProducts = rankProducts(catProducts, signalsMap, "category", {
-                max_products: 8,
-                ...rules[`cat_${cat.slug}`]
-              });
-              groups.push({ category: cat, products: rankedCatProducts });
-            }
+        // 2. ✨ New Arrivals: Chronological by created_at, strictly deduplicated
+        const newestCandidates = allProducts
+          .filter((p) => !usedIds.has(p.id))
+          .sort((a, b) => {
+            const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+            return timeB - timeA;
           });
-          setCategoryProductGroups(groups);
-        }
+        const resolvedNewest = newestCandidates.length >= 2 ? newestCandidates.slice(0, 8) : allProducts.slice(0, 8);
+        resolvedNewest.forEach((p) => usedIds.add(p.id));
+        setNewArrivals(resolvedNewest);
+
+        // 3. 🏆 Best Sellers: Top rated & sales volume, strictly deduplicated
+        const bestSellerCandidates = allProducts.filter((p) => !usedIds.has(p.id));
+        const bestRanked = rankProducts(bestSellerCandidates, signalsMap, "top_selection", { max_products: 8 });
+        const resolvedBest = bestRanked.length >= 2 ? bestRanked.slice(0, 8) : (bestSellerCandidates.length > 0 ? bestSellerCandidates.slice(0, 8) : allProducts.slice(0, 8));
+        resolvedBest.forEach((p) => usedIds.add(p.id));
+        setBestSellers(resolvedBest);
+
+        // 4. 💡 Recommended: Curated selection from remaining items, strictly deduplicated
+        const remainingCandidates = allProducts.filter((p) => !usedIds.has(p.id));
+        const resolvedRec = remainingCandidates.length >= 2 ? remainingCandidates.slice(0, 8) : allProducts.slice(0, 8);
+        setRecommended(resolvedRec);
       }
 
       setIsLoading(false);
@@ -242,73 +290,65 @@ export default function Homepage() {
     fetchHomepageData();
   }, [supabase]);
 
-  const ProductSkeleton = () => (
-    <div className="flex flex-col gap-3 p-3 rounded-2xl border border-border/40 bg-background min-w-[170px] md:min-w-[220px]">
-      <div className="aspect-square rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
-      <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-3/4" />
-      <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-1/2" />
-      <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-1/4 mt-auto" />
-    </div>
-  );
+  // Current active products for Discover tab
+  const currentTabProducts = useMemo(() => {
+    switch (activeDiscoverTab) {
+      case "trending":
+        return trendingNow;
+      case "new_arrivals":
+        return newArrivals;
+      case "best_sellers":
+        return bestSellers;
+      case "recommended":
+        return recommended;
+      default:
+        return trendingNow;
+    }
+  }, [activeDiscoverTab, trendingNow, newArrivals, bestSellers, recommended]);
 
   return (
-    <div className="flex-1 w-full pb-24 bg-background overflow-x-hidden">
-      
-      {/* MAIN HERO BANNER */}
-      <section className="px-4 md:px-12 max-w-[1440px] mx-auto mt-3 md:mt-4">
-        <div className="relative h-[280px] sm:h-[360px] md:h-[480px] w-full rounded-3xl overflow-hidden shadow-lg border border-border/40 group">
-          {heroSlides.length > 0 ? (
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={currentSlide}
-                initial={{ opacity: 0, scale: 1.02 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.7 }}
-                className="absolute inset-0 h-full w-full"
-              >
-                <Image
-                  src={heroSlides[currentSlide]?.image_url || "https://images.unsplash.com/photo-1542838132-92c53300491e?w=1974&q=80"}
-                  alt={heroSlides[currentSlide]?.heading || "Hero Banner"}
-                  fill
-                  priority
-                  className="object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/50 to-transparent" />
-              </motion.div>
-            </AnimatePresence>
-          ) : (
-            <div className="w-full h-full bg-slate-200 dark:bg-slate-800 animate-pulse" />
-          )}
-
-          {/* Banner Hero Text */}
+    <div className="flex flex-col min-h-screen bg-background text-foreground overflow-x-hidden">
+      {/* 1. HERO CAROUSEL */}
+      <section className="relative w-full max-w-[1440px] mx-auto pt-3 md:pt-4 px-4 md:px-12">
+        <div className="relative w-full h-[320px] sm:h-[400px] md:h-[460px] rounded-3xl overflow-hidden shadow-xl bg-slate-900 group">
           {heroSlides.length > 0 && (
-            <div className="absolute inset-0 flex items-center z-10 p-6 md:p-14 pointer-events-none">
-              <div className="max-w-2xl flex flex-col gap-3 md:gap-5 text-white pointer-events-auto">
+            <div className="relative w-full h-full">
+              <Image
+                src={heroSlides[currentSlide]?.image_url || FALLBACK_HERO_SLIDES[0].image_url}
+                alt={heroSlides[currentSlide]?.heading || "VENDOSMITH Marketplace"}
+                fill
+                priority
+                className="object-cover transition-transform duration-700 ease-out"
+                sizes="(max-width: 768px) 100vw, 1440px"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/50 to-transparent" />
+
+              {/* Slide Content */}
+              <div className="absolute inset-0 flex flex-col justify-center px-6 sm:px-12 md:px-16 text-white max-w-2xl z-10">
                 <AnimatePresence mode="wait">
                   <motion.div
-                    key={`hero-text-${currentSlide}`}
-                    initial={{ y: 20, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: -20, opacity: 0 }}
-                    transition={{ duration: 0.5 }}
+                    key={currentSlide}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.35, ease: "easeOut" }}
                     className="flex flex-col gap-2 md:gap-3"
                   >
-                    <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-white/20 backdrop-blur-md w-fit text-white">
-                      <Sparkles className="w-3.5 h-3.5 text-yellow-400" /> Exclusive Marketplace Deals
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-white/20 backdrop-blur-md w-fit text-white">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" /> Exclusive Marketplace Deals
                     </span>
-                    <h1 className="text-2xl sm:text-4xl md:text-6xl font-bold leading-tight font-sans tracking-tight">
+                    <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold leading-tight tracking-tight">
                       {heroSlides[currentSlide]?.heading}
                     </h1>
-                    <p className="text-xs sm:text-base md:text-xl text-white/90 max-w-lg font-normal">
+                    <p className="text-xs sm:text-sm md:text-base text-white/90 max-w-lg font-normal">
                       {heroSlides[currentSlide]?.subheading}
                     </p>
                   </motion.div>
                 </AnimatePresence>
 
-                <div className="mt-2 md:mt-4">
+                <div className="mt-4 md:mt-6">
                   <Link href={heroSlides[currentSlide]?.cta_link || "/products"}>
-                    <Button variant="primary" className="bg-accent hover:bg-accent/90 text-white font-bold px-6 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm md:text-base">
+                    <Button variant="primary" className="bg-accent hover:bg-accent/90 text-white font-bold px-6 py-3 rounded-xl shadow-lg flex items-center gap-2 text-xs sm:text-sm">
                       {heroSlides[currentSlide]?.cta_text || "Shop Now"}
                       <ArrowRight className="w-4 h-4" />
                     </Button>
@@ -318,7 +358,7 @@ export default function Homepage() {
             </div>
           )}
 
-          {/* Navigation Controls */}
+          {/* Controls */}
           {heroSlides.length > 1 && (
             <>
               <button
@@ -341,7 +381,9 @@ export default function Homepage() {
                   <button
                     key={i}
                     onClick={() => setCurrentSlide(i)}
-                    className={`h-2 rounded-full transition-all duration-300 ${currentSlide === i ? "bg-white w-7" : "bg-white/50 w-2 hover:bg-white/80"}`}
+                    className={`h-2 rounded-full transition-all duration-300 ${
+                      currentSlide === i ? "bg-white w-7" : "bg-white/50 w-2 hover:bg-white/80"
+                    }`}
                   />
                 ))}
               </div>
@@ -350,242 +392,209 @@ export default function Homepage() {
         </div>
       </section>
 
-      {/* 4. PREMIUM SHOP BY CATEGORY (Blinkit-Inspired Light Style) */}
-      <section className="mt-3 md:mt-4 pb-4 md:pb-6 px-4 md:px-12 max-w-[1440px] mx-auto">
-        <div className="flex items-end justify-between gap-4 mb-3 md:mb-3.5">
-          <div>
-            <h2 className="font-sans text-xl sm:text-2xl md:text-2xl font-bold tracking-tight text-foreground leading-tight">
-              Shop by Category
-            </h2>
-            <p className="font-sans text-xs md:text-sm text-foreground-secondary mt-0.5">
-              Explore our wide selection of top verified marketplace departments
-            </p>
-          </div>
-          <Link 
-            href="/products" 
-            className="shrink-0 font-sans text-xs md:text-sm font-semibold text-accent hover:text-accent/80 transition-colors flex items-center gap-1 group pb-0.5 outline-none focus:outline-none focus-visible:underline"
-          >
-            See All Categories <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 sm:gap-4 md:gap-6 justify-items-center">
-          {isLoading ? (
-            Array(6).fill(0).map((_, i) => (
-              <div key={i} className="flex flex-col items-center w-full max-w-[110px]">
-                <div className="w-[72px] h-[72px] sm:w-[84px] sm:h-[84px] md:w-[96px] md:h-[96px] rounded-full bg-slate-100 dark:bg-slate-800 animate-pulse aspect-square border border-slate-200/60 dark:border-slate-700/60" />
-                <div className="w-14 sm:w-16 h-3.5 bg-slate-200 dark:bg-slate-800 rounded animate-pulse mt-2" />
-              </div>
-            ))
-          ) : (
-            categories.slice(0, 6).map((cat) => {
-              const catImage = cat.image_url || CATEGORY_IMAGE_FALLBACKS[cat.slug] || "https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&q=80";
-
-              return (
-                <Link
-                  key={cat.id}
-                  href={`/categories/${cat.slug}`}
-                  className="group flex flex-col items-center text-center w-full max-w-[110px] select-none outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 rounded-2xl"
-                >
-                  <div className="relative w-[72px] h-[72px] sm:w-[84px] sm:h-[84px] md:w-[96px] md:h-[96px] aspect-square rounded-full overflow-hidden bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/70 shadow-xs transition-all duration-200 group-hover:scale-[1.03] group-hover:border-accent group-hover:shadow-sm">
-                    <Image
-                      src={catImage}
-                      alt={cat.name}
-                      fill
-                      sizes="(max-width: 640px) 72px, (max-width: 768px) 84px, 96px"
-                      className="object-cover transition-transform duration-200 group-hover:scale-105"
-                    />
-                  </div>
-                  <span className="font-sans text-xs md:text-sm font-semibold text-slate-800 dark:text-slate-200 group-hover:text-accent line-clamp-1 text-center transition-colors max-w-full px-0.5 mt-1.5 md:mt-2">
-                    {cat.name}
-                  </span>
-                </Link>
-              );
-            })
-          )}
-        </div>
-      </section>
-
-      {/* 5. PERSONALIZED / RECENTLY VIEWED */}
-      <section className="py-8 px-4 md:px-12 max-w-[1440px] mx-auto bg-gradient-to-r from-accent/5 via-transparent to-accent/5 rounded-3xl my-6 border border-accent/10">
-        <div className="flex justify-between items-end mb-6">
-          <div>
-            <span className="text-xs font-bold text-accent uppercase tracking-wider">Recommended for you</span>
-            <h2 className="text-xl md:text-3xl font-bold text-foreground mt-0.5">
-              {userName ? `${userName}, still looking for these?` : "You May Also Like"}
-            </h2>
-          </div>
-          <Link href="/products" className="text-xs md:text-sm font-semibold text-accent hover:underline">Explore</Link>
-        </div>
-
-        {isLoading ? (
-          <div className="flex gap-4">
-            {Array(4).fill(0).map((_, i) => <ProductSkeleton key={i} />)}
-          </div>
-        ) : (
-          <ProductCarousel>
-            {personalizedProducts.map((product) => {
-              const effectivePrice = product.sale_price && product.sale_price > 0 && product.sale_price < product.price
-                ? product.sale_price
-                : product.price;
-
-              return (
-                <div key={product.id} className="min-w-[170px] max-w-[170px] md:min-w-[230px] md:max-w-[230px] snap-start">
-                  <ProductCard
-                    id={product.id}
-                    slug={product.slug}
-                    title={product.title}
-                    price={product.price}
-                    salePrice={product.sale_price}
-                    primaryImage={product.product_images?.[0]?.image_url || "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800&q=80"}
-                    onQuickAdd={() => {
-                      addItem({
-                        id: product.id,
-                        productId: product.id,
-                        title: product.title,
-                        price: effectivePrice,
-                        image: product.product_images?.[0]?.image_url || "",
-                      });
-                      addToast({ title: "Added to Cart", type: "success" });
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </ProductCarousel>
-        )}
-      </section>
-
-      {/* 6. FESTIVAL / SPECIAL COLLECTION */}
-      {homepageConfig?.special_collection?.is_active && (
-        <section className="py-10 px-4 md:px-12 max-w-[1440px] mx-auto my-6">
-          <div className="relative rounded-3xl overflow-hidden bg-gradient-to-r from-orange-600 via-amber-600 to-amber-700 text-white p-6 md:p-12 shadow-xl">
-            <div className="relative z-10">
-              <span className="uppercase tracking-widest text-xs font-bold bg-white/20 px-3 py-1 rounded-full">
-                Seasonal Campaign
-              </span>
-              <h2 className="text-2xl md:text-5xl font-extrabold mt-3 tracking-tight">
-                {homepageConfig.special_collection.title}
-              </h2>
-              <p className="text-white/90 text-sm md:text-lg mt-2 max-w-2xl">
-                {homepageConfig.special_collection.subtitle}
-              </p>
-
-              {/* Cards Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mt-8">
-                {homepageConfig.special_collection.cards.map((card, i) => (
-                  <Link
-                    key={i}
-                    href={card.link}
-                    className="group bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 rounded-2xl p-3 flex flex-col items-center text-center transition-all hover:scale-[1.03]"
-                  >
-                    <div className="relative w-full aspect-square rounded-xl overflow-hidden mb-3 bg-white/10">
-                      <Image
-                        src={card.image}
-                        alt={card.title}
-                        fill
-                        className="object-cover group-hover:scale-110 transition-transform duration-300"
-                      />
-                    </div>
-                    <span className="text-xs md:text-sm font-bold line-clamp-1">{card.title}</span>
-                    <span className="text-[11px] text-yellow-300 font-semibold mt-1">{card.offer}</span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* 7. DEALS OF THE DAY */}
-      <section className="py-10 px-4 md:px-12 max-w-[1440px] mx-auto my-6">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-red-500/10 text-red-500 rounded-xl">
-              <Flame className="w-6 h-6 animate-bounce" />
+      {/* 2. VALUE PROPOSITION REASSURANCE BAR */}
+      <section className="py-6 px-4 md:px-12 max-w-[1440px] mx-auto w-full">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+          <div className="flex items-center gap-3 p-2">
+            <div className="p-2.5 rounded-xl bg-accent/10 text-accent shrink-0">
+              <Truck className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl md:text-3xl font-extrabold text-foreground flex items-center gap-2">
-                Deals of the Day
-              </h2>
-              <p className="text-xs md:text-sm text-foreground-secondary">Ranked by highest discount percentage & stock availability</p>
+              <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100">Fast Express Delivery</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Direct from local & national sellers</p>
             </div>
           </div>
-          <Link href="/products" className="text-xs md:text-sm font-semibold text-accent hover:underline">
-            View All Deals
+          <div className="flex items-center gap-3 p-2">
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100">100% Verified Stores</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Authentic & inspected products</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-2">
+            <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 shrink-0">
+              <RefreshCw className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100">Hassle-Free Returns</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">7-day replacement guarantee</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-2">
+            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+              <Zap className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100">Instant UPI & Cards</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Cashfree & COD supported</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 3. PREMIUM CATEGORY SHOWCASE */}
+      <section className="py-8 px-4 md:px-12 max-w-[1440px] mx-auto w-full">
+        <div className="flex items-end justify-between gap-4 mb-6">
+          <div>
+            <div className="flex items-center gap-1.5 text-xs font-bold text-accent uppercase tracking-wider mb-1">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Browse By Department</span>
+            </div>
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+              Featured Categories
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+              Explore authentic collections from certified multi-vendor stores
+            </p>
+          </div>
+          <Link
+            href="/products"
+            className="hidden sm:inline-flex items-center gap-1 text-xs sm:text-sm font-bold text-accent hover:underline group"
+          >
+            <span>All Categories</span>
+            <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
         </div>
 
-        {isLoading ? (
-          <div className="flex gap-4">
-            {Array(4).fill(0).map((_, i) => <ProductSkeleton key={i} />)}
-          </div>
-        ) : (
-          <ProductCarousel>
-            {dealsOfDay.map((product) => {
-              const effectivePrice = product.sale_price && product.sale_price > 0 && product.sale_price < product.price
-                ? product.sale_price
-                : product.price;
-
-              return (
-                <div key={product.id} className="min-w-[170px] max-w-[170px] md:min-w-[240px] md:max-w-[240px] snap-start">
-                  <ProductCard
-                    id={product.id}
-                    slug={product.slug}
-                    title={product.title}
-                    price={product.price}
-                    salePrice={product.sale_price}
-                    primaryImage={product.product_images?.[0]?.image_url || "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800&q=80"}
-                    onQuickAdd={() => {
-                      addItem({
-                        id: product.id,
-                        productId: product.id,
-                        title: product.title,
-                        price: effectivePrice,
-                        image: product.product_images?.[0]?.image_url || "",
-                      });
-                      addToast({ title: "Added to Cart", type: "success" });
-                    }}
+        {/* Desktop: 4-8 visible / Mobile: horizontal snap carousel */}
+        <div className="flex sm:grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 overflow-x-auto sm:overflow-x-visible pb-3 sm:pb-0 scrollbar-none snap-x snap-mandatory">
+          {MARKETPLACE_CATEGORIES.map((cat, idx) => {
+            const IconComp = cat.icon;
+            return (
+              <Link
+                key={idx}
+                href={`/categories/${cat.slug}`}
+                className="group relative flex flex-col justify-between bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-3.5 sm:p-4 hover:shadow-xl hover:border-accent/40 dark:hover:border-accent/40 transition-all duration-300 min-w-[220px] sm:min-w-0 snap-start hover:-translate-y-1"
+              >
+                {/* Image Container with zoom */}
+                <div className="relative aspect-[4/3] w-full rounded-xl overflow-hidden mb-3 bg-slate-100 dark:bg-slate-800">
+                  <Image
+                    src={cat.image}
+                    alt={cat.name}
+                    fill
+                    className="object-cover group-hover:scale-108 transition-transform duration-500 ease-out"
+                    sizes="(max-width: 640px) 220px, (max-width: 1024px) 33vw, 25vw"
                   />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-transparent to-transparent opacity-80 group-hover:opacity-60 transition-opacity" />
+
+                  {/* Category Floating Icon */}
+                  <div className="absolute top-2.5 left-2.5 p-2 rounded-xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-md shadow-xs text-accent group-hover:scale-110 transition-transform">
+                    <IconComp className="w-4 h-4" />
+                  </div>
                 </div>
-              );
-            })}
-          </ProductCarousel>
-        )}
+
+                {/* Content */}
+                <div className="flex flex-col gap-1">
+                  <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100 group-hover:text-accent transition-colors line-clamp-1">
+                    {cat.name}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
+                    {cat.description}
+                  </p>
+                </div>
+
+                {/* Explore Link with micro-interaction */}
+                <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-bold text-accent">
+                  <span>Explore</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1.5 transition-transform duration-200" />
+                </div>
+              </Link>
+            );
+          })}
+        </div>
       </section>
 
-      {/* 8. TOP SELECTION */}
-      <section className="py-10 px-4 md:px-12 max-w-[1440px] mx-auto">
-        <div className="flex justify-between items-end mb-6">
+      {/* 4. THE ONE STRONG EDITORIAL "DISCOVER PRODUCTS" SECTION */}
+      <section className="py-12 px-4 md:px-12 max-w-[1440px] mx-auto w-full my-2">
+        {/* Editorial Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-5 mb-8 border-b border-slate-200/80 dark:border-slate-800 pb-6">
           <div>
-            <h2 className="text-xl md:text-3xl font-bold text-foreground flex items-center gap-2">
-              <Award className="w-6 h-6 text-yellow-500" /> Top Selection
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="p-1 bg-accent/10 text-accent rounded-lg">
+                <Sparkles className="w-3.5 h-3.5" />
+              </span>
+              <span className="text-[11px] font-extrabold text-accent uppercase tracking-widest">
+                Curated Marketplace Selection
+              </span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+              DISCOVER PRODUCTS
             </h2>
-            <p className="text-xs md:text-sm text-foreground-secondary mt-1">Highest rated & top-performing curated items</p>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+              Explore trending products, fresh arrivals and customer favourites.
+            </p>
           </div>
-          <Link href="/products" className="text-xs md:text-sm font-semibold text-accent hover:underline">Explore All</Link>
+
+          {/* Segmented Control Tabs */}
+          <div className="flex items-center gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-800/90 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 overflow-x-auto scrollbar-none self-start md:self-auto">
+            {DISCOVER_TABS.map((tab) => {
+              const isSelected = activeDiscoverTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveDiscoverTab(tab.id)}
+                  className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 ${
+                    isSelected
+                      ? "bg-accent text-white shadow-md shadow-accent/25 scale-[1.02]"
+                      : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60"
+                  }`}
+                >
+                  <span>{tab.icon}</span>
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
+        {/* Smooth Tab Content Transition */}
         {isLoading ? (
-          <div className="flex gap-4">
-            {Array(4).fill(0).map((_, i) => <ProductSkeleton key={i} />)}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+            {Array(8)
+              .fill(0)
+              .map((_, i) => (
+                <div key={i} className="flex flex-col gap-3 p-3 rounded-2xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900">
+                  <div className="aspect-square rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                  <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-3/4" />
+                  <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-1/3" />
+                </div>
+              ))}
+          </div>
+        ) : currentTabProducts.length === 0 ? (
+          <div className="p-12 text-center bg-slate-50 dark:bg-slate-900 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+            <Package className="w-10 h-10 text-slate-400 mx-auto mb-2" />
+            <p className="text-sm font-bold text-slate-700 dark:text-slate-300">No products found in this tab.</p>
+            <p className="text-xs text-slate-400 mt-1">Check back soon for new additions.</p>
           </div>
         ) : (
-          <ProductCarousel>
-            {topSelection.map((product) => {
-              const effectivePrice = product.sale_price && product.sale_price > 0 && product.sale_price < product.price
-                ? product.sale_price
-                : product.price;
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeDiscoverTab}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: "easeInOut" }}
+              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6"
+            >
+              {currentTabProducts.map((product) => {
+                const effectivePrice =
+                  product.sale_price && product.sale_price > 0 && product.sale_price < product.price
+                    ? product.sale_price
+                    : product.price;
 
-              return (
-                <div key={product.id} className="min-w-[170px] max-w-[170px] md:min-w-[240px] md:max-w-[240px] snap-start">
+                return (
                   <ProductCard
+                    key={product.id}
                     id={product.id}
                     slug={product.slug}
                     title={product.title}
                     price={product.price}
                     salePrice={product.sale_price}
-                    primaryImage={product.product_images?.[0]?.image_url || "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800&q=80"}
+                    isNew={activeDiscoverTab === "new_arrivals"}
+                    primaryImage={product.product_images?.[0]?.image_url || "/placeholder.jpg"}
+                    storeName={product.stores?.name || "Verified Store"}
                     onQuickAdd={() => {
                       addItem({
                         id: product.id,
@@ -594,21 +603,35 @@ export default function Homepage() {
                         price: effectivePrice,
                         image: product.product_images?.[0]?.image_url || "",
                       });
-                      addToast({ title: "Added to Cart", type: "success" });
+                      addToast({ title: "Added to Cart ✓", type: "success" });
                     }}
                   />
-                </div>
-              );
-            })}
-          </ProductCarousel>
+                );
+              })}
+            </motion.div>
+          </AnimatePresence>
         )}
+
+        {/* View All Products CTA */}
+        <div className="mt-10 flex justify-center">
+          <Link href="/products">
+            <Button
+              variant="outline"
+              size="lg"
+              className="rounded-xl px-8 font-bold text-xs sm:text-sm hover:border-accent hover:text-accent group shadow-2xs"
+            >
+              <span>Explore All Products in Catalog</span>
+              <ChevronRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" />
+            </Button>
+          </Link>
+        </div>
       </section>
 
-      {/* 9. IN THE SPOTLIGHT */}
+      {/* 5. SPOTLIGHT CARDS (If configured) */}
       {homepageConfig?.in_the_spotlight?.is_active && (
-        <section className="py-10 px-4 md:px-12 max-w-[1440px] mx-auto my-6">
+        <section className="py-8 px-4 md:px-12 max-w-[1440px] mx-auto w-full my-4">
           <div className="mb-6">
-            <h2 className="text-xl md:text-3xl font-bold text-foreground flex items-center gap-2">
+            <h2 className="text-xl md:text-3xl font-extrabold text-foreground flex items-center gap-2">
               <Zap className="w-6 h-6 text-amber-500" /> {homepageConfig.in_the_spotlight.title}
             </h2>
             <p className="text-xs md:text-sm text-foreground-secondary mt-1">{homepageConfig.in_the_spotlight.subtitle}</p>
@@ -642,184 +665,18 @@ export default function Homepage() {
         </section>
       )}
 
-      {/* 10. TRENDING NOW */}
-      <section className="py-10 px-4 md:px-12 max-w-[1440px] mx-auto">
-        <div className="flex justify-between items-end mb-6">
-          <div>
-            <h2 className="text-xl md:text-3xl font-bold text-foreground flex items-center gap-2">
-              <TrendingUp className="w-6 h-6 text-emerald-500" /> Trending Now
-            </h2>
-            <p className="text-xs md:text-sm text-foreground-secondary mt-1">Ranked by sales volume + recent order frequency</p>
+      {/* 6. TRUST & VERIFICATION FOOTNOTE */}
+      <section className="py-12 px-4 md:px-12 max-w-[1440px] mx-auto w-full text-center">
+        <div className="p-8 rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex flex-col items-center">
+          <div className="w-12 h-12 rounded-2xl bg-accent/10 text-accent flex items-center justify-center mb-3">
+            <CheckCircle2 className="w-6 h-6" />
           </div>
-          <Link href="/products" className="text-xs md:text-sm font-semibold text-accent hover:underline">View All</Link>
-        </div>
-
-        {isLoading ? (
-          <div className="flex gap-4">
-            {Array(4).fill(0).map((_, i) => <ProductSkeleton key={i} />)}
-          </div>
-        ) : (
-          <ProductCarousel>
-            {trendingNow.map((product) => {
-              const effectivePrice = product.sale_price && product.sale_price > 0 && product.sale_price < product.price
-                ? product.sale_price
-                : product.price;
-
-              return (
-                <div key={product.id} className="min-w-[170px] max-w-[170px] md:min-w-[240px] md:max-w-[240px] snap-start">
-                  <ProductCard
-                    id={product.id}
-                    slug={product.slug}
-                    title={product.title}
-                    price={product.price}
-                    salePrice={product.sale_price}
-                    primaryImage={product.product_images?.[0]?.image_url || "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800&q=80"}
-                    onQuickAdd={() => {
-                      addItem({
-                        id: product.id,
-                        productId: product.id,
-                        title: product.title,
-                        price: effectivePrice,
-                        image: product.product_images?.[0]?.image_url || "",
-                      });
-                      addToast({ title: "Added to Cart", type: "success" });
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </ProductCarousel>
-        )}
-      </section>
-
-      {/* 11. CATEGORY-WISE PRODUCT ROWS */}
-      {categoryProductGroups.map((group) => (
-        <section key={group.category.id} className="py-8 px-4 md:px-12 max-w-[1440px] mx-auto">
-          <div className="flex justify-between items-end mb-6">
-            <div>
-              <h2 className="text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
-                <Tag className="w-5 h-5 text-accent" /> {group.category.name}
-              </h2>
-              <p className="text-xs text-foreground-secondary mt-0.5">Ranked selection from {group.category.name}</p>
-            </div>
-            <Link href={`/categories/${group.category.slug}`} className="text-xs font-semibold text-accent hover:underline flex items-center gap-1">
-              View Category <ChevronRight className="w-4 h-4" />
-            </Link>
-          </div>
-
-          <ProductCarousel>
-            {group.products.map((product) => {
-              const effectivePrice = product.sale_price && product.sale_price > 0 && product.sale_price < product.price
-                ? product.sale_price
-                : product.price;
-
-              return (
-                <div key={product.id} className="min-w-[170px] max-w-[170px] md:min-w-[230px] md:max-w-[230px] snap-start">
-                  <ProductCard
-                    id={product.id}
-                    slug={product.slug}
-                    title={product.title}
-                    price={product.price}
-                    salePrice={product.sale_price}
-                    primaryImage={product.product_images?.[0]?.image_url || "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800&q=80"}
-                    onQuickAdd={() => {
-                      addItem({
-                        id: product.id,
-                        productId: product.id,
-                        title: product.title,
-                        price: effectivePrice,
-                        image: product.product_images?.[0]?.image_url || "",
-                      });
-                      addToast({ title: "Added to Cart", type: "success" });
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </ProductCarousel>
-        </section>
-      ))}
-
-      {/* 12. RECENTLY VIEWED */}
-      <section className="py-10 px-4 md:px-12 max-w-[1440px] mx-auto">
-        <div className="flex justify-between items-end mb-6">
-          <div>
-            <h2 className="text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
-              <Clock className="w-5 h-5 text-foreground-secondary" /> Recently Viewed Items
-            </h2>
-          </div>
-          <Link href="/products" className="text-xs font-semibold text-accent hover:underline">Explore More</Link>
-        </div>
-
-        {isLoading ? (
-          <div className="flex gap-4">
-            {Array(4).fill(0).map((_, i) => <ProductSkeleton key={i} />)}
-          </div>
-        ) : (
-          <ProductCarousel>
-            {topSelection.slice(0, 6).map((product) => {
-              const effectivePrice = product.sale_price && product.sale_price > 0 && product.sale_price < product.price
-                ? product.sale_price
-                : product.price;
-
-              return (
-                <div key={product.id} className="min-w-[170px] max-w-[170px] md:min-w-[220px] md:max-w-[220px] snap-start">
-                  <ProductCard
-                    id={product.id}
-                    slug={product.slug}
-                    title={product.title}
-                    price={product.price}
-                    salePrice={product.sale_price}
-                    primaryImage={product.product_images?.[0]?.image_url || "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800&q=80"}
-                    onQuickAdd={() => {
-                      addItem({
-                        id: product.id,
-                        productId: product.id,
-                        title: product.title,
-                        price: effectivePrice,
-                        image: product.product_images?.[0]?.image_url || "",
-                      });
-                      addToast({ title: "Added to Cart", type: "success" });
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </ProductCarousel>
-        )}
-      </section>
-
-      {/* Trust & Guarantee Banner */}
-      <section className="py-12 mt-10 bg-background-secondary/80 border-t border-border">
-        <div className="max-w-[1440px] mx-auto px-4 md:px-12 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 bg-background rounded-full flex items-center justify-center text-accent shadow-xs">
-              <Truck className="w-6 h-6" />
-            </div>
-            <h4 className="font-bold text-sm md:text-base text-foreground">Fast Local Delivery</h4>
-            <p className="text-xs text-foreground-secondary">Direct from verified local stores</p>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 bg-background rounded-full flex items-center justify-center text-emerald-500 shadow-xs">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
-            <h4 className="font-bold text-sm md:text-base text-foreground">100% Safe Payments</h4>
-            <p className="text-xs text-foreground-secondary">Protected SSL encryption</p>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 bg-background rounded-full flex items-center justify-center text-purple-500 shadow-xs">
-              <RefreshCw className="w-6 h-6" />
-            </div>
-            <h4 className="font-bold text-sm md:text-base text-foreground">Hassle-Free Returns</h4>
-            <p className="text-xs text-foreground-secondary">Easy customer return policy</p>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 bg-background rounded-full flex items-center justify-center text-yellow-500 shadow-xs">
-              <Star className="w-6 h-6" />
-            </div>
-            <h4 className="font-bold text-sm md:text-base text-foreground">Verified Sellers</h4>
-            <p className="text-xs text-foreground-secondary">Authentic products only</p>
-          </div>
+          <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+            India&apos;s Trusted Multi-Vendor E-Commerce Marketplace
+          </h3>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-xl mt-1">
+            Shop directly from verified Indian merchants with automated order tracking, invoice generation, Cashfree payments, and dedicated customer support.
+          </p>
         </div>
       </section>
     </div>

@@ -3,22 +3,22 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  Search, 
-  ShoppingBag, 
-  User, 
-  Menu, 
-  X, 
-  Sun, 
-  Moon, 
-  MapPin, 
-  ChevronDown, 
-  Package, 
-  Heart, 
-  Store, 
-  HelpCircle, 
-  LogOut, 
-  LogIn, 
+import {
+  Search,
+  ShoppingBag,
+  User,
+  Menu,
+  X,
+  Sun,
+  Moon,
+  MapPin,
+  ChevronDown,
+  Package,
+  Heart,
+  Store,
+  HelpCircle,
+  LogOut,
+  LogIn,
   LayoutDashboard,
   Sparkles,
   ShieldCheck
@@ -40,6 +40,9 @@ interface HeaderUser {
   id: string;
   email?: string;
   name?: string | null;
+  isApprovedSeller?: boolean;
+  isPendingSeller?: boolean;
+  sellerStatus?: string | null;
 }
 
 export function Header() {
@@ -49,7 +52,7 @@ export function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [user, setUser] = useState<HeaderUser | null>(null);
-  
+
   const { itemCount, openDrawer } = useCart();
   const { theme, toggleTheme } = useTheme();
   const supabase = createClient();
@@ -73,20 +76,39 @@ export function Header() {
     const resolveUserData = async (sbUser: SupabaseUser | null): Promise<HeaderUser | null> => {
       if (!sbUser) return null;
       let name = (sbUser.user_metadata?.full_name as string) || (sbUser.user_metadata?.name as string) || null;
-      if (!name) {
-        try {
-          const { data: prof } = await supabase.from("profiles").select("full_name").eq("id", sbUser.id).maybeSingle();
-          if (prof?.full_name) {
-            name = prof.full_name;
-          }
-        } catch {
-          // Ignore profile load errors, fallback to auth user metadata
+      let isApprovedSeller = false;
+      let isPendingSeller = false;
+      let sellerStatus: string | null = null;
+
+      try {
+        const [profileRes, sellerRes] = await Promise.all([
+          supabase.from("profiles").select("full_name, role").eq("id", sbUser.id).maybeSingle(),
+          supabase.from("seller_profiles").select("verification_status").eq("id", sbUser.id).maybeSingle()
+        ]);
+        if (profileRes.data?.full_name) {
+          name = profileRes.data.full_name;
         }
+        const userRole = profileRes.data?.role;
+        sellerStatus = sellerRes.data?.verification_status || null;
+
+        if (userRole === "admin" || userRole === "seller" || sellerStatus === "approved") {
+          isApprovedSeller = true;
+          isPendingSeller = false;
+        } else if (sellerRes.data) {
+          isApprovedSeller = false;
+          isPendingSeller = true;
+        }
+      } catch {
+        // Ignore profile load errors, fallback to auth user metadata
       }
+
       return {
         id: sbUser.id,
         email: sbUser.email,
         name: name?.trim() || null,
+        isApprovedSeller,
+        isPendingSeller,
+        sellerStatus,
       };
     };
 
@@ -127,15 +149,15 @@ export function Header() {
     <>
       {/* SINGLE FIXED STOREFRONT HEADER CONTAINER */}
       <header className={`fixed top-0 left-0 right-0 z-40 transition-all duration-300 flex flex-col select-none ${
-        isScrolled 
-          ? "bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-md shadow-slate-950/5 dark:shadow-slate-950/30 border-b border-slate-200/80 dark:border-slate-800/80" 
+        isScrolled
+          ? "bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-md shadow-slate-950/5 dark:shadow-slate-950/30 border-b border-slate-200/80 dark:border-slate-800/80"
           : "bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800"
       }`}>
-        
+
         {/* ROW 1: TOP UTILITY BAR (Desktop only, collapses on scroll) */}
         <div className={`hidden md:flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/95 dark:bg-slate-950/70 px-4 md:px-12 text-[12px] text-slate-500 dark:text-slate-400 overflow-hidden transition-all duration-300 ${
-          isScrolled 
-            ? "max-h-0 opacity-0 -translate-y-2 py-0 border-none pointer-events-none" 
+          isScrolled
+            ? "max-h-0 opacity-0 -translate-y-2 py-0 border-none pointer-events-none"
             : "max-h-[40px] h-[38px] min-h-[38px] opacity-100"
         }`}>
           <div className="max-w-[1440px] mx-auto w-full flex items-center justify-between">
@@ -154,24 +176,42 @@ export function Header() {
 
             {/* Right Utility Links */}
             <div className="flex items-center gap-5 font-medium">
-              <Link 
-                href="/seller/register" 
-                className="flex items-center gap-1.5 text-accent hover:text-accent-hover hover:underline transition-colors font-semibold"
-              >
-                <Store className="w-3.5 h-3.5" />
-                <span>Become a Seller</span>
-              </Link>
+              {user?.isApprovedSeller ? (
+                <Link
+                  href="/seller"
+                  className="flex items-center gap-1.5 text-accent hover:text-accent-hover hover:underline transition-colors font-semibold"
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Switch to Seller Hub</span>
+                </Link>
+              ) : user?.isPendingSeller ? (
+                <Link
+                  href="/seller/tracking"
+                  className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:underline transition-colors font-semibold"
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Track Application</span>
+                </Link>
+              ) : (
+                <Link
+                  href="/seller/register"
+                  className="flex items-center gap-1.5 text-accent hover:text-accent-hover hover:underline transition-colors font-semibold"
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Become a Seller</span>
+                </Link>
+              )}
               <span className="text-slate-300 dark:text-slate-700">|</span>
-              <Link 
-                href="/stores" 
+              <Link
+                href="/stores"
                 className="hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1"
               >
                 <MapPin className="w-3.5 h-3.5" />
                 <span>Local Stores</span>
               </Link>
               <span className="text-slate-300 dark:text-slate-700">|</span>
-              <Link 
-                href="/support" 
+              <Link
+                href="/support"
                 className="hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1"
               >
                 <HelpCircle className="w-3.5 h-3.5" />
@@ -180,8 +220,8 @@ export function Header() {
               {user && (
                 <>
                   <span className="text-slate-300 dark:text-slate-700">|</span>
-                  <Link 
-                    href="/account/orders" 
+                  <Link
+                    href="/account/orders"
                     className="hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1 text-slate-700 dark:text-slate-300"
                   >
                     <Package className="w-3.5 h-3.5" />
@@ -198,7 +238,7 @@ export function Header() {
           <div className={`mx-auto max-w-[1440px] px-4 md:px-12 w-full flex items-center justify-between gap-3 md:gap-6 transition-all duration-300 ${
             isScrolled ? "h-[54px] md:h-[58px] min-h-[54px] md:min-h-[58px]" : "h-[60px] md:h-[64px] min-h-[60px] md:min-h-[64px]"
           }`}>
-            
+
             {/* Left Section: Logo + Subtitle (LOCKED TOGETHER) + Deliver to Location */}
             <div className="flex items-center gap-3 md:gap-5 shrink-0">
               {/* Mobile Menu Toggle */}
@@ -211,8 +251,8 @@ export function Header() {
               </button>
 
               {/* Logo Branding Block */}
-              <Link 
-                href="/" 
+              <Link
+                href="/"
                 className="flex flex-col shrink-0 py-0.5 select-none group"
               >
                 <span className="font-serif text-2xl md:text-[26px] font-black tracking-tight text-slate-950 dark:text-white whitespace-nowrap leading-none group-hover:opacity-90 transition-opacity">
@@ -236,7 +276,7 @@ export function Header() {
             </div>
 
             {/* Center Section: Large Dominant Marketplace Search Bar */}
-            <div 
+            <div
               onClick={() => setIsSearchOpen(true)}
               className="flex-1 max-w-[740px] mx-auto hidden md:flex items-center cursor-pointer group"
               role="search"
@@ -256,7 +296,7 @@ export function Header() {
             {/* Right Section: Actions (Theme, Notification, Account, Cart) */}
             <div className="flex items-center gap-1 md:gap-2.5 shrink-0">
               {/* Mobile Search Button */}
-              <button 
+              <button
                 onClick={() => setIsSearchOpen(true)}
                 className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors md:hidden text-foreground"
                 aria-label="Search products"
@@ -265,7 +305,7 @@ export function Header() {
               </button>
 
               {/* Theme Toggle */}
-              <button 
+              <button
                 onClick={toggleTheme}
                 className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-700 dark:text-slate-200"
                 aria-label="Toggle theme"
@@ -331,16 +371,56 @@ export function Header() {
                               <Package className="w-4 h-4 text-slate-500" />
                               My Orders
                             </Link>
+
+                            {/* Seller Navigation Option */}
+                            {user.isApprovedSeller ? (
+                              <Link
+                                href="/seller"
+                                onClick={() => setIsAccountMenuOpen(false)}
+                                className="flex items-center gap-2.5 px-4 py-2.5 text-blue-600 dark:text-blue-400 font-bold bg-blue-50/70 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors border-y border-blue-100 dark:border-blue-900/40 my-0.5"
+                              >
+                                <Store className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                <span>Switch to Seller Hub</span>
+                              </Link>
+                            ) : user.isPendingSeller ? (
+                              <Link
+                                href="/seller/tracking"
+                                onClick={() => setIsAccountMenuOpen(false)}
+                                className="flex items-center gap-2.5 px-4 py-2.5 text-amber-600 dark:text-amber-400 font-semibold bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors border-y border-amber-100 dark:border-amber-900/40 my-0.5"
+                              >
+                                <Store className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                                <span>Track Application</span>
+                              </Link>
+                            ) : (
+                              <Link
+                                href="/seller/register"
+                                onClick={() => setIsAccountMenuOpen(false)}
+                                className="flex items-center gap-2.5 px-4 py-2.5 text-accent font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                              >
+                                <Store className="w-4 h-4 text-accent" />
+                                <span>Become a Seller</span>
+                              </Link>
+                            )}
                           </>
                         ) : (
-                          <Link
-                            href="/login"
-                            onClick={() => setIsAccountMenuOpen(false)}
-                            className="flex items-center gap-2.5 px-4 py-2.5 text-accent font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                          >
-                            <LogIn className="w-4 h-4 text-accent" />
-                            Sign In / Register
-                          </Link>
+                          <>
+                            <Link
+                              href="/login"
+                              onClick={() => setIsAccountMenuOpen(false)}
+                              className="flex items-center gap-2.5 px-4 py-2.5 text-accent font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            >
+                              <LogIn className="w-4 h-4 text-accent" />
+                              Sign In / Register
+                            </Link>
+                            <Link
+                              href="/seller/register"
+                              onClick={() => setIsAccountMenuOpen(false)}
+                              className="flex items-center gap-2.5 px-4 py-2.5 text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            >
+                              <Store className="w-4 h-4 text-slate-500" />
+                              <span>Become a Seller</span>
+                            </Link>
+                          </>
                         )}
 
                         <Link
@@ -450,7 +530,7 @@ export function Header() {
                 {user?.id && (
                   <CustomerNotificationCenter userId={user.id} />
                 )}
-                <button 
+                <button
                   onClick={toggleTheme}
                   className="p-2 hover:bg-background-secondary rounded-full transition-colors"
                   aria-label="Toggle theme"
@@ -466,7 +546,7 @@ export function Header() {
                 </button>
               </div>
             </div>
-            
+
             {/* Mobile Location */}
             <div className="p-4 border-b border-border flex items-center gap-3 bg-background-secondary/50">
               <MapPin className="w-5 h-5 text-accent shrink-0" />
@@ -485,7 +565,7 @@ export function Header() {
               <Link href="/stores" className="text-base font-semibold text-secondary-accent flex items-center gap-2" onClick={() => setIsMobileMenuOpen(false)}>
                 Local Stores <span className="px-2 py-0.5 bg-secondary-accent/10 rounded text-[10px] font-bold">VERIFIED</span>
               </Link>
-              
+
               {user ? (
                 <div className="flex flex-col gap-2 p-3 bg-background-secondary/60 rounded-xl border border-border">
                   <span className="text-[10px] font-bold text-foreground-secondary uppercase tracking-wider">My Account</span>
@@ -511,14 +591,49 @@ export function Header() {
                 </Link>
               )}
 
-              <div className="flex flex-col gap-2.5 p-4 bg-accent/5 rounded-xl border border-accent/10">
-                <Link href="/seller/register" className="text-sm font-bold text-accent flex items-center gap-1.5" onClick={() => setIsMobileMenuOpen(false)}>
-                  <Store className="w-4 h-4" /> Become a Seller
-                </Link>
-                <Link href="/seller/login" className="text-xs font-medium text-foreground-secondary" onClick={() => setIsMobileMenuOpen(false)}>
-                  Seller Portal Login
-                </Link>
-              </div>
+              {user?.isApprovedSeller ? (
+                <div className="flex flex-col gap-2 p-3.5 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900/50">
+                  <Link
+                    href="/seller"
+                    className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    <Store className="w-4 h-4" />
+                    <span>Switch to Seller Hub</span>
+                  </Link>
+                </div>
+              ) : user?.isPendingSeller ? (
+                <div className="flex flex-col gap-2 p-3.5 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-900/50">
+                  <Link
+                    href="/seller/tracking"
+                    className="text-sm font-bold text-amber-600 dark:text-amber-400 flex items-center gap-2"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    <Store className="w-4 h-4" />
+                    <span>Track Seller Application</span>
+                  </Link>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2.5 p-4 bg-accent/5 rounded-xl border border-accent/10">
+                  <Link
+                    href="/seller/register"
+                    className="text-sm font-bold text-accent flex items-center gap-1.5"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    <Store className="w-4 h-4" />
+                    <span>Become a Seller</span>
+                  </Link>
+                  {!user && (
+                    <Link
+                      href="/seller/login"
+                      className="text-xs font-medium text-foreground-secondary hover:text-foreground"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                      Seller Portal Login
+                    </Link>
+                  )}
+                </div>
+              )}
 
               <div className="h-px bg-border w-full my-1" />
               <h3 className="text-xs font-bold text-foreground-secondary uppercase tracking-wider">Browse Categories</h3>
@@ -542,11 +657,11 @@ export function Header() {
 
             <div className="p-6 border-t border-border flex justify-between items-center bg-background">
               {user ? (
-                <button 
+                <button
                   onClick={() => {
                     setIsMobileMenuOpen(false);
                     handleSignOut();
-                  }} 
+                  }}
                   className="flex items-center gap-1.5 text-xs font-semibold text-destructive"
                 >
                   <LogOut className="w-4 h-4" /> Sign Out
@@ -558,7 +673,7 @@ export function Header() {
                 </Link>
               )}
 
-              <button 
+              <button
                 onClick={() => {
                   setIsMobileMenuOpen(false);
                   setIsSearchOpen(true);

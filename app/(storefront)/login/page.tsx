@@ -35,7 +35,6 @@ function LoginContent() {
 
   const routeUser = async (userId: string) => {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", userId).single();
-    const { data: sellerProfile } = await supabase.from("seller_profiles").select("verification_status").eq("id", userId).single();
 
     if (redirect === "/admin") {
       if (profile?.role === "admin") {
@@ -51,7 +50,7 @@ function LoginContent() {
       return;
     }
 
-    addToast({ title: "Welcome!", type: "success" });
+    addToast({ title: "Welcome back!", type: "success" });
 
     if (profile?.role === "admin") {
       router.push("/admin");
@@ -59,19 +58,13 @@ function LoginContent() {
       return;
     }
 
-    if (profile?.role === "seller" && sellerProfile?.verification_status === "approved") {
-      router.push("/seller");
-      router.refresh();
-      return;
-    }
+    // Always open normal customer storefront/account after login
+    // Never auto-redirect sellers to /seller or /seller/onboarding
+    const targetRedirect = redirect === "/admin" || redirect === "/seller" || redirect.startsWith("/seller/")
+      ? "/"
+      : redirect;
 
-    if (sellerProfile) {
-      router.push("/seller/onboarding");
-      router.refresh();
-      return;
-    }
-
-    router.push(redirect === "/admin" ? "/" : redirect);
+    router.push(targetRedirect);
     router.refresh();
   };
 

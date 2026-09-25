@@ -8,18 +8,18 @@ const ThemeContext = createContext<{
   theme: Theme;
   toggleTheme: () => void;
 }>({
-  theme: "dark",
+  theme: "light",
   toggleTheme: () => { },
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("light");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     const stored = localStorage.getItem("theme") as Theme | null;
-    const initialTheme = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const initialTheme = stored === "dark" ? "dark" : "light";
     setTheme(initialTheme);
   }, []);
 
@@ -38,7 +38,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // Render children immediately to avoid hydration mismatch, script in head handles initial class
   return (
-    <ThemeContext.Provider value={{ theme: mounted ? theme : "dark", toggleTheme }}>
+    <ThemeContext.Provider value={{ theme: mounted ? theme : "light", toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

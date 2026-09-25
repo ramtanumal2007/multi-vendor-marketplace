@@ -87,13 +87,17 @@ function SellerLoginContent() {
       return;
     }
 
+    const targetRedirect = redirect && redirect !== "/seller" && redirect !== "/seller/login" && redirect !== "/seller/onboarding"
+      ? redirect
+      : "/";
+
     if (profile?.role === "seller" && sellerProfile?.verification_status === "approved") {
-      addToast({ title: "Welcome back!", type: "success" });
-      router.push(redirect === "/seller/login" ? "/seller" : redirect);
+      addToast({ title: "Welcome back!", description: "Switch to Seller Hub anytime from your account menu.", type: "success" });
+      router.push(targetRedirect);
       router.refresh();
     } else {
-      addToast({ title: "Account Pending", description: `Your seller account is currently ${sellerProfile.verification_status || "pending review"}.`, type: "info" });
-      router.push("/seller/onboarding");
+      addToast({ title: "Account Pending", description: `Your seller application is currently ${sellerProfile.verification_status || "under review"}.`, type: "info" });
+      router.push(targetRedirect);
       router.refresh();
     }
   };

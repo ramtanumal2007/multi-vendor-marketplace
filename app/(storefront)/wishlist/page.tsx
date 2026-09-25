@@ -85,7 +85,7 @@ export default function WishlistPage() {
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-12">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-6">
           {wishlistProducts.map(product => {
             const primaryImage = product.product_images?.[0]?.image_url || "/placeholder.jpg";
             return (

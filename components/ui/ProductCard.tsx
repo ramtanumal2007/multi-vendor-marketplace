@@ -169,14 +169,14 @@ export function ProductCard({
 
   return (
     <div
-      className="group relative flex flex-col bg-white dark:bg-slate-900 p-3 sm:p-3.5 rounded-2xl shadow-xs border border-slate-200/90 dark:border-slate-800 hover:shadow-xl hover:border-accent/40 dark:hover:border-accent/40 transition-all duration-300 h-full hover:-translate-y-1"
+      className="group relative flex flex-col bg-white dark:bg-slate-900 p-2 sm:p-3.5 rounded-xl sm:rounded-2xl shadow-xs border border-slate-200/90 dark:border-slate-800 hover:shadow-xl hover:border-accent/40 dark:hover:border-accent/40 transition-all duration-300 h-full hover:-translate-y-1"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       {/* Premium Image Container */}
       <div
         ref={cardImageRef}
-        className="relative aspect-square w-full overflow-hidden bg-slate-100 dark:bg-slate-800/80 rounded-xl mb-2.5"
+        className="relative aspect-square w-full overflow-hidden bg-slate-100 dark:bg-slate-800/80 rounded-lg sm:rounded-xl mb-1.5 sm:mb-2.5"
       >
         <Link href={`/products/${targetSlug}`} className="block absolute inset-0 w-full h-full">
           {/* Primary Image with smooth hover zoom */}
@@ -219,14 +219,14 @@ export function ProductCard({
         </Link>
 
         {/* Top Badges */}
-        <div className="absolute top-2.5 left-2.5 z-20 flex flex-col gap-1 items-start pointer-events-none">
+        <div className="absolute top-1.5 left-1.5 sm:top-2.5 sm:left-2.5 z-20 flex flex-col gap-1 items-start pointer-events-none">
           {isNew && (
-            <div className="flex h-5 items-center justify-center rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-2 text-[9px] font-extrabold uppercase tracking-wider shadow-xs">
+            <div className="flex h-4 sm:h-5 items-center justify-center rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-1.5 sm:px-2 text-[8px] sm:text-[9px] font-extrabold uppercase tracking-wider shadow-xs">
               New
             </div>
           )}
           {hasDiscount && discountPercent > 0 && (
-            <div className="flex h-5 items-center justify-center rounded-md bg-emerald-600 text-white px-1.5 text-[10px] font-bold shadow-xs">
+            <div className="flex h-4 sm:h-5 items-center justify-center rounded sm:rounded-md bg-emerald-600 text-white px-1 sm:px-1.5 text-[8px] sm:text-[10px] font-bold shadow-xs">
               {discountPercent}% OFF
             </div>
           )}
@@ -240,15 +240,15 @@ export function ProductCard({
           }}
           disabled={isWishlistLoading}
           aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-          className="absolute top-2.5 right-2.5 z-30 p-2 rounded-full bg-white/80 dark:bg-black/50 backdrop-blur-md hover:bg-white dark:hover:bg-black/70 text-slate-600 dark:text-white/80 hover:text-red-500 transition-colors shadow-xs"
+          className="absolute top-1.5 right-1.5 sm:top-2.5 sm:right-2.5 z-30 p-1.5 sm:p-2 rounded-full bg-white/80 dark:bg-black/50 backdrop-blur-md hover:bg-white dark:hover:bg-black/70 text-slate-600 dark:text-white/80 hover:text-red-500 transition-colors shadow-xs"
         >
-          <Heart className={`w-3.5 h-3.5 ${isWishlisted ? "fill-red-500 text-red-500" : ""}`} />
+          <Heart className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${isWishlisted ? "fill-red-500 text-red-500" : ""}`} />
         </button>
 
         {/* Quick Add Button */}
-        <div className="absolute bottom-2.5 right-2.5 z-20">
+        <div className="absolute bottom-1.5 right-1.5 sm:bottom-2.5 sm:right-2.5 z-20">
           <button
-            className={`w-9 h-9 sm:w-10 sm:h-10 ${
+            className={`w-7 h-7 sm:w-10 sm:h-10 ${
               isJustAdded
                 ? "bg-emerald-600 text-white scale-105 shadow-emerald-500/30"
                 : isAdding
@@ -260,55 +260,55 @@ export function ProductCard({
             title="Quick Add to Cart"
           >
             {isJustAdded ? (
-              <Check className="w-4 h-4 sm:w-5 sm:h-5 animate-in zoom-in-75 duration-200" />
+              <Check className="w-3.5 h-3.5 sm:w-5 sm:h-5 animate-in zoom-in-75 duration-200" />
             ) : isAdding ? (
-              <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
+              <Loader2 className="w-3.5 h-3.5 sm:w-5 sm:h-5 animate-spin" />
             ) : (
-              <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5" />
+              <ShoppingCart className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
             )}
           </button>
         </div>
       </div>
 
       {/* Product Details Section */}
-      <div className="flex flex-col gap-1.5 flex-1 px-0.5">
+      <div className="flex flex-col gap-1 sm:gap-1.5 flex-1 px-0.5">
         {/* Verified Store Badge */}
-        <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-          <ShieldCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+        <div className="flex items-center gap-1 text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+          <ShieldCheck className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
           <span className="truncate">{storeName || (isVerifiedStore ? "Verified Store" : "Marketplace Store")}</span>
         </div>
 
         {/* Title */}
         <Link href={`/products/${targetSlug}`}>
-          <h3 className="font-semibold text-xs sm:text-sm leading-snug text-slate-900 dark:text-slate-100 hover:text-accent transition-colors line-clamp-2">
+          <h3 className="font-semibold text-[11px] sm:text-sm leading-tight sm:leading-snug text-slate-900 dark:text-slate-100 hover:text-accent transition-colors line-clamp-2">
             {title}
           </h3>
         </Link>
 
         {/* Rating & Review Count */}
-        <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-          <div className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-bold text-[11px] border border-amber-200/60 dark:border-amber-900/50">
+        <div className="flex items-center gap-1 sm:gap-1.5 text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+          <div className="flex items-center gap-0.5 px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-bold text-[10px] sm:text-[11px] border border-amber-200/60 dark:border-amber-900/50">
             <span>{displayRating.toFixed(1)}</span>
-            <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+            <Star className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-amber-500 text-amber-500" />
           </div>
-          <span className="text-[11px] text-slate-400 dark:text-slate-500">
+          <span className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500">
             ({displayReviews})
           </span>
         </div>
 
         {/* Pricing in Indian Rupee (₹) */}
-        <div className="mt-auto pt-1 flex items-baseline gap-2 flex-wrap">
+        <div className="mt-auto pt-1 flex items-baseline gap-1.5 sm:gap-2 flex-wrap">
           {hasDiscount && effectiveSalePrice ? (
             <>
-              <span className="text-accent font-extrabold text-sm sm:text-base leading-none">
+              <span className="text-accent font-extrabold text-xs sm:text-base leading-none">
                 {formatCurrency(effectiveSalePrice)}
               </span>
-              <span className="text-slate-400 line-through text-xs font-normal">
+              <span className="text-slate-400 line-through text-[10px] sm:text-xs font-normal">
                 {formatCurrency(price)}
               </span>
             </>
           ) : (
-            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-sm sm:text-base leading-none">
+            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-xs sm:text-base leading-none">
               {formatCurrency(price)}
             </span>
           )}

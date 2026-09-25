@@ -14,6 +14,7 @@ import {
   Package
 } from "lucide-react";
 import { ProductCard } from "@/components/ui/ProductCard";
+import { PromotionalGridBanner } from "@/components/storefront/PromotionalGridBanner";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useCart } from "@/lib/context/CartContext";
@@ -152,15 +153,15 @@ export default function ProductListingPage() {
   const gridContainerClass = useMemo(() => {
     const count = visibleProducts.length;
     if (count === 1) {
-      return "max-w-sm mx-auto grid grid-cols-1 justify-center";
+      return "max-w-sm mx-auto grid grid-cols-2 sm:grid-cols-2 justify-center gap-2.5 sm:gap-4 md:gap-6";
     }
     if (count === 2) {
-      return "max-w-2xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-6 justify-center";
+      return "max-w-2xl mx-auto grid grid-cols-2 sm:grid-cols-2 gap-2.5 sm:gap-4 md:gap-6 justify-center";
     }
     if (count === 3) {
-      return "max-w-4xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 justify-center";
+      return "max-w-4xl mx-auto grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-4 md:gap-6 justify-center";
     }
-    return "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6";
+    return "grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6";
   }, [visibleProducts.length]);
 
   const sortLabel = useMemo(() => {
@@ -412,14 +413,14 @@ export default function ProductListingPage() {
         {/* 3. PRODUCT GRID */}
         <div className="flex-1">
           {isLoading ? (
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
               {Array(8)
                 .fill(0)
                 .map((_, i) => (
-                  <div key={i} className="flex flex-col gap-3 p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                    <div className="aspect-square rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                    <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-3/4" />
-                    <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-1/4 mt-auto" />
+                  <div key={i} className="flex flex-col gap-2 p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                    <div className="aspect-square rounded-lg sm:rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                    <div className="h-3.5 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-3/4" />
+                    <div className="h-3.5 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-1/4 mt-auto" />
                   </div>
                 ))}
             </div>
@@ -461,20 +462,26 @@ export default function ProductListingPage() {
             </div>
           ) : (
             <>
-              {/* Dynamically centered product grid for small counts */}
+              {/* Dynamically centered product grid with promotional blocks */}
               <div className={gridContainerClass}>
-                {visibleProducts.map((product) => (
-                  <ProductCard
-                    key={product.id}
-                    id={product.id}
-                    slug={product.slug}
-                    title={product.title}
-                    price={product.price}
-                    salePrice={product.sale_price}
-                    primaryImage={product.product_images?.[0]?.image_url || "/placeholder.jpg"}
-                    storeName={product.stores?.name || "Verified Store"}
-                    onQuickAdd={() => handleQuickAdd(product)}
-                  />
+                {visibleProducts.map((product, index) => (
+                  <React.Fragment key={product.id}>
+                    <ProductCard
+                      id={product.id}
+                      slug={product.slug}
+                      title={product.title}
+                      price={product.price}
+                      salePrice={product.sale_price}
+                      primaryImage={product.product_images?.[0]?.image_url || "/placeholder.jpg"}
+                      storeName={product.stores?.name || "Verified Store"}
+                      onQuickAdd={() => handleQuickAdd(product)}
+                    />
+                    {(index + 1) % 8 === 0 && index !== visibleProducts.length - 1 && (
+                      <div className="col-span-full my-2 sm:my-3">
+                        <PromotionalGridBanner bannerIndex={Math.floor(index / 8)} />
+                      </div>
+                    )}
+                  </React.Fragment>
                 ))}
               </div>
 

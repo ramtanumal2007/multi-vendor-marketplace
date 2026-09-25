@@ -3,10 +3,11 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { User, Package, MapPin, Heart, Settings, LogOut, ArrowLeft } from "lucide-react";
+import { User, Package, MapPin, Heart, Settings, LogOut, ArrowLeft, Store } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
+import { useAuth } from "@/lib/context/AuthContext";
 
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
@@ -23,6 +24,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
   const router = useRouter();
   const supabase = createClient();
   const { addToast } = useToast();
+  const { isApprovedSeller, isPendingSeller } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -71,11 +73,29 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
           <nav className="flex flex-row md:flex-col gap-2 overflow-x-auto pb-4 md:pb-0">
             <Link
               href="/"
-              className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-foreground-secondary hover:bg-background-secondary hover:text-foreground transition-colors whitespace-nowrap mb-4"
+              className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-foreground-secondary hover:bg-background-secondary hover:text-foreground transition-colors whitespace-nowrap mb-2"
             >
               <ArrowLeft className="w-4 h-4" />
               Back to Shop
             </Link>
+            {isApprovedSeller && (
+              <Link
+                href="/seller"
+                className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-bold text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-900/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors whitespace-nowrap mb-2"
+              >
+                <Store className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                Switch to Seller Hub
+              </Link>
+            )}
+            {isPendingSeller && (
+              <Link
+                href="/seller/tracking"
+                className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold text-amber-600 dark:text-amber-400 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/50 hover:bg-amber-100 dark:hover:bg-amber-900/60 transition-colors whitespace-nowrap mb-2"
+              >
+                <Store className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                Track Application
+              </Link>
+            )}
             {ACCOUNT_LINKS.map(link => {
               const isActive = pathname === link.href;
               return (

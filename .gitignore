@@ -40,3 +40,4 @@ lint_all.txt
 lint_output.txt
 lint_remaining.txt
 supabase/.temp/
+.vercel

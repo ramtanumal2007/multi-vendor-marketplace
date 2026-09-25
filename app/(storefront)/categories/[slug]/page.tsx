@@ -162,12 +162,12 @@ export default function CategoryPage({ params }: { params: { slug: string } }) {
         {/* Product Grid */}
         <div className="flex-1">
           {isLoading ? (
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-12">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
               {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="animate-pulse flex flex-col gap-3">
-                  <div className="w-full aspect-[3/4] bg-background-secondary rounded-lg" />
-                  <div className="h-4 bg-background-secondary rounded w-3/4" />
-                  <div className="h-4 bg-background-secondary rounded w-1/4" />
+                <div key={i} className="animate-pulse flex flex-col gap-2 p-2 sm:p-3 rounded-xl sm:rounded-2xl border border-border">
+                  <div className="w-full aspect-square bg-background-secondary rounded-lg" />
+                  <div className="h-3.5 bg-background-secondary rounded w-3/4" />
+                  <div className="h-3.5 bg-background-secondary rounded w-1/4" />
                 </div>
               ))}
             </div>
@@ -178,7 +178,7 @@ export default function CategoryPage({ params }: { params: { slug: string } }) {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-12">
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
                 {products.map((product) => (
                   <ProductCard
                     key={product.id}

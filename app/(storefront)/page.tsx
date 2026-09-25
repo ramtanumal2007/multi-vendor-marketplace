@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ProductCard } from "@/components/ui/ProductCard";
+import { PromotionalGridBanner } from "@/components/storefront/PromotionalGridBanner";
 import { createClient } from "@/lib/supabase";
 import { useToast } from "@/components/ui/Toast";
 import { useCart } from "@/lib/context/CartContext";
@@ -551,14 +552,14 @@ export default function Homepage() {
 
         {/* Smooth Tab Content Transition */}
         {isLoading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
             {Array(8)
               .fill(0)
               .map((_, i) => (
-                <div key={i} className="flex flex-col gap-3 p-3 rounded-2xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900">
-                  <div className="aspect-square rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
-                  <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-3/4" />
-                  <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-1/3" />
+                <div key={i} className="flex flex-col gap-2 p-2 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900">
+                  <div className="aspect-square rounded-lg sm:rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                  <div className="h-3.5 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-3/4" />
+                  <div className="h-3.5 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-1/3" />
                 </div>
               ))}
           </div>
@@ -576,36 +577,42 @@ export default function Homepage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.22, ease: "easeInOut" }}
-              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6"
+              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6"
             >
-              {currentTabProducts.map((product) => {
+              {currentTabProducts.map((product, index) => {
                 const effectivePrice =
                   product.sale_price && product.sale_price > 0 && product.sale_price < product.price
                     ? product.sale_price
                     : product.price;
 
                 return (
-                  <ProductCard
-                    key={product.id}
-                    id={product.id}
-                    slug={product.slug}
-                    title={product.title}
-                    price={product.price}
-                    salePrice={product.sale_price}
-                    isNew={activeDiscoverTab === "new_arrivals"}
-                    primaryImage={product.product_images?.[0]?.image_url || "/placeholder.jpg"}
-                    storeName={product.stores?.name || "Verified Store"}
-                    onQuickAdd={() => {
-                      addItem({
-                        id: product.id,
-                        productId: product.id,
-                        title: product.title,
-                        price: effectivePrice,
-                        image: product.product_images?.[0]?.image_url || "",
-                      });
-                      addToast({ title: "Added to Cart ✓", type: "success" });
-                    }}
-                  />
+                  <React.Fragment key={product.id}>
+                    <ProductCard
+                      id={product.id}
+                      slug={product.slug}
+                      title={product.title}
+                      price={product.price}
+                      salePrice={product.sale_price}
+                      isNew={activeDiscoverTab === "new_arrivals"}
+                      primaryImage={product.product_images?.[0]?.image_url || "/placeholder.jpg"}
+                      storeName={product.stores?.name || "Verified Store"}
+                      onQuickAdd={() => {
+                        addItem({
+                          id: product.id,
+                          productId: product.id,
+                          title: product.title,
+                          price: effectivePrice,
+                          image: product.product_images?.[0]?.image_url || "",
+                        });
+                        addToast({ title: "Added to Cart ✓", type: "success" });
+                      }}
+                    />
+                    {(index + 1) % 4 === 0 && index !== currentTabProducts.length - 1 && (
+                      <div className="col-span-full my-1 sm:my-2">
+                        <PromotionalGridBanner bannerIndex={Math.floor(index / 4)} />
+                      </div>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </motion.div>

@@ -31,7 +31,9 @@ export async function GET(request: Request) {
     )
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`)
+      // Ensure sellers are NEVER auto-redirected to /seller or /seller/onboarding
+      const sanitizedNext = (next === '/seller' || next === '/seller/onboarding' || next.startsWith('/seller/')) ? '/' : next
+      return NextResponse.redirect(`${origin}${sanitizedNext}`)
     }
   }
 

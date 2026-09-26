@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { Store } from "lucide-react";
 import Link from "next/link";
 import { SellerDashboardHero } from "@/components/seller/SellerDashboardHero";
@@ -16,17 +17,28 @@ export default async function SellerDashboardPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Ignore in Server Component
+          }
         },
       },
     }
   );
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-  if (!session) return null;
+  if (userError || !user) {
+    redirect("/seller/login");
+  }
 
-  const sellerId = session.user.id;
+  const sellerId = user.id;
 
   // 1. Fetch seller profile
   const { data: sellerProfile } = await supabase

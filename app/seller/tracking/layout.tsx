@@ -12,8 +12,17 @@ export default async function TrackingLayout({ children }: { children: ReactNode
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Ignore in Server Component
+          }
         },
       },
     }
@@ -24,24 +33,18 @@ export default async function TrackingLayout({ children }: { children: ReactNode
     redirect("/seller/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
   const { data: sellerProfile } = await supabase
     .from("seller_profiles")
     .select("id, verification_status")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
 
   if (!sellerProfile) {
     // Normal customer without seller account
     redirect("/seller/onboarding");
   }
 
-  const isApprovedSeller = profile?.role === "seller" || profile?.role === "admin";
+  const isApprovedSeller = sellerProfile.verification_status === "approved";
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -117,7 +120,7 @@ export default async function TrackingLayout({ children }: { children: ReactNode
             <span>{isApprovedSeller ? "Seller Portal" : "Applicant Portal"}</span>
           </Link>
         </header>
-        
+
         <div className="p-6 md:p-8 max-w-6xl mx-auto">
           {children}
         </div>

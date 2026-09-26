@@ -12,6 +12,7 @@ interface AuthContextType {
   isPendingSeller: boolean;
   sellerStatus: string | null;
   role: string | null;
+  fullName: string | null;
   refreshAuth: () => Promise<void>;
 }
 
@@ -23,6 +24,7 @@ const AuthContext = createContext<AuthContextType>({
   isPendingSeller: false,
   sellerStatus: null,
   role: null,
+  fullName: null,
   refreshAuth: async () => {},
 });
 
@@ -34,6 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isPendingSeller, setIsPendingSeller] = useState(false);
   const [sellerStatus, setSellerStatus] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [fullName, setFullName] = useState<string | null>(null);
   const supabase = createClient();
 
   const resolveSellerStatus = async (userId: string | undefined) => {
@@ -42,31 +45,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsPendingSeller(false);
       setSellerStatus(null);
       setRole(null);
+      setFullName(null);
       return;
     }
 
     try {
       const [profileRes, sellerRes] = await Promise.all([
-        supabase.from("profiles").select("role").eq("id", userId).maybeSingle(),
+        supabase.from("profiles").select("role, full_name").eq("id", userId).maybeSingle(),
         supabase.from("seller_profiles").select("verification_status").eq("id", userId).maybeSingle()
       ]);
 
       const userRole = profileRes.data?.role || null;
+      const userName = profileRes.data?.full_name || null;
       const status = sellerRes.data?.verification_status || null;
 
       setRole(userRole);
+      setFullName(userName);
       setSellerStatus(status);
 
-      if (userRole === "admin" || userRole === "seller" || status === "approved") {
-        setIsApprovedSeller(true);
-        setIsPendingSeller(false);
-      } else if (sellerRes.data) {
-        setIsApprovedSeller(false);
-        setIsPendingSeller(true);
-      } else {
-        setIsApprovedSeller(false);
-        setIsPendingSeller(false);
-      }
+      // Approved seller status MUST be based strictly on seller_profiles.verification_status === "approved"
+      const isApproved = status === "approved";
+      // Pending status includes pending review and correction states
+      const isPending = !isApproved && (status === "pending" || status === "under_review" || status === "correction_required");
+
+      setIsApprovedSeller(isApproved);
+      setIsPendingSeller(isPending);
     } catch {
       // In case of error, default to safe customer state
       setIsApprovedSeller(false);
@@ -85,6 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsPendingSeller(false);
       setSellerStatus(null);
       setRole(null);
+      setFullName(null);
     }
     setIsLoading(false);
   };
@@ -103,6 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsPendingSeller(false);
           setSellerStatus(null);
           setRole(null);
+          setFullName(null);
         }
         setIsLoading(false);
       }
@@ -111,6 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       subscription.unsubscribe();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -123,6 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isPendingSeller,
         sellerStatus,
         role,
+        fullName,
         refreshAuth: fetchSession,
       }}
     >

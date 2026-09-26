@@ -10,8 +10,17 @@ export default async function SellerOnboardingPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Ignore in Server Component
+          }
         },
       },
     }
@@ -22,22 +31,14 @@ export default async function SellerOnboardingPage() {
     redirect("/seller/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
   const { data: sellerProfile } = await supabase
     .from("seller_profiles")
     .select("id, verification_status")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
 
-  if (profile?.role === "seller" || profile?.role === "admin") {
-    if (sellerProfile && sellerProfile.verification_status === "approved") {
-      redirect("/seller"); // Already onboarded and approved
-    }
+  if (sellerProfile?.verification_status === "approved") {
+    redirect("/seller"); // Already onboarded and approved
   }
 
   if (sellerProfile) {

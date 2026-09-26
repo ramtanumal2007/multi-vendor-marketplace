@@ -46,8 +46,8 @@ export function Footer() {
             <h4 className="font-serif text-lg font-medium">Support</h4>
             <Link href="/support" className="text-sm font-semibold text-accent hover:text-accent-hover transition-colors">Help &amp; Support</Link>
             <Link href="/faq" className="text-sm text-foreground-secondary hover:text-foreground transition-colors">FAQ</Link>
-            <Link href="/shipping" className="text-sm text-foreground-secondary hover:text-foreground transition-colors">Shipping Policy</Link>
-            <Link href="/returns" className="text-sm text-foreground-secondary hover:text-foreground transition-colors">Returns Policy</Link>
+            <Link href="/policies/shipping" className="text-sm text-foreground-secondary hover:text-foreground transition-colors">Shipping Policy</Link>
+            <Link href="/policies/returns" className="text-sm text-foreground-secondary hover:text-foreground transition-colors">Returns Policy</Link>
             <Link href="/contact" className="text-sm text-foreground-secondary hover:text-foreground transition-colors">Contact Us</Link>
           </div>
 
@@ -78,8 +78,8 @@ export function Footer() {
             &copy; {new Date().getFullYear()} VENDOSMITH. All rights reserved.
           </p>
           <div className="flex gap-4">
-            <Link href="/privacy" className="text-xs text-foreground-secondary hover:text-foreground transition-colors">Privacy Policy</Link>
-            <Link href="/terms" className="text-xs text-foreground-secondary hover:text-foreground transition-colors">Terms of Service</Link>
+            <Link href="/policies/privacy" className="text-xs text-foreground-secondary hover:text-foreground transition-colors">Privacy Policy</Link>
+            <Link href="/policies/terms" className="text-xs text-foreground-secondary hover:text-foreground transition-colors">Terms of Service</Link>
           </div>
         </div>
       </div>

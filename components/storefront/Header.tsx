@@ -28,21 +28,12 @@ import { SearchModal } from "./SearchModal";
 import { useTheme } from "@/lib/context/ThemeContext";
 import { createClient } from "@/lib/supabase";
 import { CustomerNotificationCenter } from "@/components/customer/CustomerNotificationCenter";
-import type { AuthChangeEvent, Session, User as SupabaseUser } from "@supabase/supabase-js";
 import { TopCategoryNav } from "./TopCategoryNav";
+import { useAuth } from "@/lib/context/AuthContext";
 
 interface CategoryItem {
   name: string;
   slug: string;
-}
-
-interface HeaderUser {
-  id: string;
-  email?: string;
-  name?: string | null;
-  isApprovedSeller?: boolean;
-  isPendingSeller?: boolean;
-  sellerStatus?: string | null;
 }
 
 export function Header() {
@@ -51,11 +42,22 @@ export function Header() {
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
-  const [user, setUser] = useState<HeaderUser | null>(null);
 
+  const { user: authUser, fullName, isApprovedSeller, isPendingSeller, sellerStatus } = useAuth();
   const { itemCount, openDrawer } = useCart();
   const { theme, toggleTheme } = useTheme();
   const supabase = createClient();
+
+  const displayName = fullName || (authUser?.user_metadata?.full_name as string) || (authUser?.user_metadata?.name as string) || (authUser?.email ? authUser.email.split("@")[0] : null);
+
+  const user = authUser ? {
+    id: authUser.id,
+    email: authUser.email,
+    name: displayName,
+    isApprovedSeller,
+    isPendingSeller,
+    sellerStatus,
+  } : null;
 
   useEffect(() => {
     const handleScroll = () => {
@@ -72,60 +74,6 @@ export function Header() {
       if (data) setCategories(data);
     }
     fetchCategories();
-
-    const resolveUserData = async (sbUser: SupabaseUser | null): Promise<HeaderUser | null> => {
-      if (!sbUser) return null;
-      let name = (sbUser.user_metadata?.full_name as string) || (sbUser.user_metadata?.name as string) || null;
-      let isApprovedSeller = false;
-      let isPendingSeller = false;
-      let sellerStatus: string | null = null;
-
-      try {
-        const [profileRes, sellerRes] = await Promise.all([
-          supabase.from("profiles").select("full_name, role").eq("id", sbUser.id).maybeSingle(),
-          supabase.from("seller_profiles").select("verification_status").eq("id", sbUser.id).maybeSingle()
-        ]);
-        if (profileRes.data?.full_name) {
-          name = profileRes.data.full_name;
-        }
-        const userRole = profileRes.data?.role;
-        sellerStatus = sellerRes.data?.verification_status || null;
-
-        if (userRole === "admin" || userRole === "seller" || sellerStatus === "approved") {
-          isApprovedSeller = true;
-          isPendingSeller = false;
-        } else if (sellerRes.data) {
-          isApprovedSeller = false;
-          isPendingSeller = true;
-        }
-      } catch {
-        // Ignore profile load errors, fallback to auth user metadata
-      }
-
-      return {
-        id: sbUser.id,
-        email: sbUser.email,
-        name: name?.trim() || null,
-        isApprovedSeller,
-        isPendingSeller,
-        sellerStatus,
-      };
-    };
-
-    // Check user auth state
-    supabase.auth.getUser().then(async ({ data }: { data: { user: SupabaseUser | null } }) => {
-      const resolved = await resolveUserData(data?.user ?? null);
-      setUser(resolved);
-    });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
-      const resolved = await resolveUserData(session?.user ?? null);
-      setUser(resolved);
-    });
-
-    return () => {
-      authListener?.subscription?.unsubscribe();
-    };
   }, [supabase]);
 
   useEffect(() => {
@@ -135,13 +83,18 @@ export function Header() {
         setIsSearchOpen(true);
       }
     };
+    const handleOpenSearchEvent = () => setIsSearchOpen(true);
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("open-search-modal", handleOpenSearchEvent);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("open-search-modal", handleOpenSearchEvent);
+    };
   }, []);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
-    setUser(null);
     setIsAccountMenuOpen(false);
   };
 
@@ -692,4 +645,3 @@ export function Header() {
     </>
   );
 }
-

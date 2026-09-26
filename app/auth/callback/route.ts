@@ -1,4 +1,4 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
@@ -9,34 +9,45 @@ export async function GET(request: Request) {
   const code = searchParams.get('code')
   // if "next" is in param, use it as the redirect URL
   const next = searchParams.get('next') ?? '/'
+  const sanitizedNext = (next === '/seller' || next === '/seller/onboarding' || next.startsWith('/seller/')) ? '/' : next
+
+  const cookieStore = cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Ignore in Route Handler
+          }
+        },
+      },
+    }
+  )
 
   if (code) {
-    const cookieStore = cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value
-          },
-          set(name: string, value: string, options: CookieOptions) {
-            cookieStore.set({ name, value, ...options })
-          },
-          remove(name: string, options: CookieOptions) {
-            cookieStore.delete({ name, ...options })
-          },
-        },
-      }
-    )
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
       // Ensure sellers are NEVER auto-redirected to /seller or /seller/onboarding
-      const sanitizedNext = (next === '/seller' || next === '/seller/onboarding' || next.startsWith('/seller/')) ? '/' : next
       return NextResponse.redirect(`${origin}${sanitizedNext}`)
     }
   }
 
-  // return the user to an error page with some instructions
+  // If code exchange failed (e.g. single-use PKCE code already consumed when user pressed Back button),
+  // check if an active authenticated session already exists:
+  const { data: { user } } = await supabase.auth.getUser()
+  if (user) {
+    return NextResponse.redirect(`${origin}${sanitizedNext}`)
+  }
+
+  // return the user to an error page only if no active session exists
   return NextResponse.redirect(`${origin}/login?error=auth-callback-failed`)
 }

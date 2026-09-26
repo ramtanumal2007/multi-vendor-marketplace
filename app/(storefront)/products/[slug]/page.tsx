@@ -17,7 +17,11 @@ import {
   ArrowRight,
   Package,
   Check,
+  Heart,
+  Share2,
+  Copy,
 } from "lucide-react";
+import { ProductReviews } from "@/components/storefront/ProductReviews";
 import { Button } from "@/components/ui/Button";
 import { useCart } from "@/lib/context/CartContext";
 import { useAuth } from "@/lib/context/AuthContext";
@@ -91,6 +95,10 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
   const [activeTab, setActiveTab] = useState("description");
   const [pinCode, setPinCode] = useState("");
 
+  const [isWishlisted, setIsWishlisted] = useState(false);
+  const [isWishlistLoading, setIsWishlistLoading] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
   const { addItem, setBuyNowItem, openDrawer, closeDrawer } = useCart();
   const { user, isLoading: authLoading } = useAuth();
   const { addToast } = useToast();
@@ -141,6 +149,67 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
     }
     fetchProduct();
   }, [params.slug, router, supabase, addToast]);
+
+  // Wishlist Status Check
+  useEffect(() => {
+    if (user && product?.id) {
+      supabase
+        .from("wishlist")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("product_id", product.id)
+        .maybeSingle()
+        .then(({ data }: { data: { id: string } | null }) => {
+          if (data) setIsWishlisted(true);
+          else setIsWishlisted(false);
+        });
+    }
+  }, [user, product?.id, supabase]);
+
+  const toggleWishlist = async () => {
+    if (!user) {
+      router.push(`/login?redirect=/products/${params.slug}`);
+      return;
+    }
+    if (isWishlistLoading || !product?.id) return;
+
+    setIsWishlistLoading(true);
+    try {
+      if (isWishlisted) {
+        await supabase
+          .from("wishlist")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("product_id", product.id);
+        setIsWishlisted(false);
+        addToast({ title: "Removed from Wishlist", type: "success" });
+      } else {
+        await supabase
+          .from("wishlist")
+          .insert({ user_id: user.id, product_id: product.id });
+        setIsWishlisted(true);
+        addToast({ title: "Added to Wishlist", type: "success" });
+      }
+    } catch {
+      addToast({ title: "Error updating wishlist", type: "error" });
+    } finally {
+      setIsWishlistLoading(false);
+    }
+  };
+
+  const handleShareWhatsApp = () => {
+    if (typeof window === "undefined" || !product) return;
+    const shareText = encodeURIComponent(`Check out ${product.title} on VENDOSMITH: ${window.location.href}`);
+    window.open(`https://api.whatsapp.com/send?text=${shareText}`, "_blank");
+  };
+
+  const handleCopyLink = () => {
+    if (typeof window === "undefined") return;
+    navigator.clipboard.writeText(window.location.href);
+    setCopiedLink(true);
+    addToast({ title: "Link Copied!", description: "Product URL copied to clipboard.", type: "success" });
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
 
   // Fetch Related Products (Phase 3)
   useEffect(() => {
@@ -571,7 +640,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
               </Button>
             </div>
 
-            {/* Subtle Instant Checkout Transition Badge */}
+            {/* Desktop Instant Checkout Transition Badge */}
             <AnimatePresence>
               {isBuyNowLoading && (
                 <motion.div
@@ -585,6 +654,40 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Wishlist & Social Share Bar */}
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <button
+                onClick={toggleWishlist}
+                disabled={isWishlistLoading}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold border transition-all ${
+                  isWishlisted
+                    ? "bg-rose-50 dark:bg-rose-950/40 text-rose-600 border-rose-300 dark:border-rose-800 shadow-xs"
+                    : "bg-card border-border text-foreground hover:bg-background-secondary"
+                }`}
+              >
+                <Heart className={`w-4 h-4 ${isWishlisted ? "fill-rose-600 text-rose-600" : ""}`} />
+                <span>{isWishlisted ? "Wishlisted" : "Save to Wishlist"}</span>
+              </button>
+
+              <button
+                onClick={handleShareWhatsApp}
+                className="flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-bold border border-emerald-300 dark:border-emerald-800/80 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition-colors"
+                title="Share on WhatsApp"
+              >
+                <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>WhatsApp</span>
+              </button>
+
+              <button
+                onClick={handleCopyLink}
+                className="flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-bold border border-border bg-card hover:bg-background-secondary text-foreground transition-colors"
+                title="Copy Product Link"
+              >
+                {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedLink ? "Copied" : "Copy Link"}</span>
+              </button>
+            </div>
           </div>
 
           {/* Dynamic Delivery & Serviceability Information */}
@@ -778,8 +881,11 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
         )}
       </section>
 
-      {/* Sticky Mobile Add to Cart & Buy Now Bar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-background border-t border-border p-3 shadow-[0_-4px_20px_rgba(0,0,0,0.15)] z-40 flex flex-col gap-2">
+      {/* PHASE 1: CUSTOMER REVIEWS & RATINGS */}
+      <ProductReviews productId={product.id} productTitle={product.title} />
+
+      {/* Sticky Mobile Add to Cart & Buy Now Bar (positioned above MobileBottomNav) */}
+      <div className="md:hidden fixed bottom-[56px] left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border p-2.5 shadow-[0_-4px_20px_rgba(0,0,0,0.12)] z-30 flex flex-col gap-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">
         <AnimatePresence>
           {isBuyNowLoading && (
             <motion.div
@@ -794,10 +900,33 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
           )}
         </AnimatePresence>
         <div className="flex items-center gap-2">
+          {/* Mobile Wishlist Quick Toggle */}
+          <button
+            type="button"
+            onClick={toggleWishlist}
+            disabled={isWishlistLoading}
+            aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+            className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl border transition-all ${
+              isWishlisted
+                ? "bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-600 shadow-xs"
+                : "bg-background-secondary/60 border-border text-foreground hover:bg-background-secondary"
+            }`}
+          >
+            {isWishlistLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+            ) : (
+              <Heart
+                className={`w-5 h-5 transition-transform active:scale-125 ${
+                  isWishlisted ? "fill-rose-500 text-rose-500" : "text-foreground"
+                }`}
+              />
+            )}
+          </button>
+
           <Button
             variant="outline"
             disabled={isAddingToCart}
-            className={`flex-1 h-12 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            className={`flex-1 h-11 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
               isAdded
                 ? "border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400"
                 : isAddingToCart
@@ -823,7 +952,7 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
           <Button
             variant="primary"
             disabled={isBuyNowLoading || Boolean(product.track_inventory && (product.stock_quantity ?? 0) <= 0)}
-            className="flex-1 h-12 text-xs font-bold bg-gradient-to-r from-amber-600 to-orange-600 text-white border-none shadow-md active:scale-95 transition-transform relative overflow-hidden"
+            className="flex-1 h-11 text-xs font-bold bg-gradient-to-r from-amber-600 to-orange-600 text-white border-none shadow-md active:scale-95 transition-transform relative overflow-hidden"
             onClick={handleBuyNow}
           >
             {isBuyNowLoading ? (
@@ -840,4 +969,3 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
     </div>
   );
 }
-

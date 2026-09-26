@@ -15,7 +15,7 @@ const ACCOUNT_LINKS = [
   { label: "Dashboard", href: "/account", icon: User },
   { label: "Orders", href: "/account/orders", icon: Package },
   { label: "Addresses", href: "/account/addresses", icon: MapPin },
-  { label: "Wishlist", href: "/account/wishlist", icon: Heart },
+  { label: "Wishlist", href: "/wishlist", icon: Heart },
   { label: "Settings", href: "/account/settings", icon: Settings },
 ];
 
@@ -66,7 +66,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
   return (
     <div className="mx-auto max-w-[1440px] px-6 md:px-16 py-12 w-full">
       <h1 className="text-4xl font-serif mb-12">My Account</h1>
-      
+
       <div className="flex flex-col md:flex-row gap-12 lg:gap-24">
         {/* Sidebar Nav */}
         <aside className="w-full md:w-64 flex-shrink-0">
@@ -78,7 +78,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
               <ArrowLeft className="w-4 h-4" />
               Back to Shop
             </Link>
-            {isApprovedSeller && (
+            {isApprovedSeller ? (
               <Link
                 href="/seller"
                 className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-bold text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-900/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors whitespace-nowrap mb-2"
@@ -86,14 +86,21 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
                 <Store className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 Switch to Seller Hub
               </Link>
-            )}
-            {isPendingSeller && (
+            ) : isPendingSeller ? (
               <Link
                 href="/seller/tracking"
                 className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold text-amber-600 dark:text-amber-400 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/50 hover:bg-amber-100 dark:hover:bg-amber-900/60 transition-colors whitespace-nowrap mb-2"
               >
                 <Store className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                 Track Application
+              </Link>
+            ) : (
+              <Link
+                href="/seller/register"
+                className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold text-accent bg-accent/5 border border-accent/20 hover:bg-accent/10 transition-colors whitespace-nowrap mb-2"
+              >
+                <Store className="w-4 h-4 text-accent" />
+                Become a Seller
               </Link>
             )}
             {ACCOUNT_LINKS.map(link => {

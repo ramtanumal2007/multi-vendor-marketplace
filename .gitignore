@@ -41,3 +41,4 @@ lint_output.txt
 lint_remaining.txt
 supabase/.temp/
 .vercel
+.env*

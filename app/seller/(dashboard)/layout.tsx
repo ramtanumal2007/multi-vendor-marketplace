@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import Link from "next/link";
-import { Store, Package, ShoppingCart, User, LogOut, LayoutDashboard, ClipboardList, Zap } from "lucide-react";
+import { Store, Package, ShoppingCart, User, LogOut, LayoutDashboard, ClipboardList, Zap, Boxes, BarChart3 } from "lucide-react";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -80,9 +80,17 @@ export default async function SellerDashboardLayout({ children }: { children: Re
                 <Package className="h-4 w-4 mr-3 text-slate-500" />
                 Products
               </Link>
+              <Link href="/seller/inventory" className="flex items-center px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-all">
+                <Boxes className="h-4 w-4 mr-3 text-indigo-500" />
+                Inventory
+              </Link>
               <Link href="/seller/orders" className="flex items-center px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-all">
                 <ShoppingCart className="h-4 w-4 mr-3 text-slate-500" />
                 Orders
+              </Link>
+              <Link href="/seller/analytics" className="flex items-center px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-all">
+                <BarChart3 className="h-4 w-4 mr-3 text-emerald-500" />
+                Analytics
               </Link>
               <Link href="/seller/membership" className="flex items-center px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-all">
                 <Zap className="h-4 w-4 mr-3 text-amber-500" />

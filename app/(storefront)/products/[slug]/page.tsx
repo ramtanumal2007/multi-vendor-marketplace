@@ -22,6 +22,8 @@ import {
   Copy,
 } from "lucide-react";
 import { ProductReviews } from "@/components/storefront/ProductReviews";
+import { RecentlyViewedSection } from "@/components/storefront/RecentlyViewedSection";
+import { addRecentlyViewed } from "@/lib/recentlyViewed";
 import { Button } from "@/components/ui/Button";
 import { useCart } from "@/lib/context/CartContext";
 import { useAuth } from "@/lib/context/AuthContext";
@@ -144,7 +146,17 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
         return;
       }
 
-      setProduct(data as DetailedProduct);
+      const loadedProduct = data as DetailedProduct;
+      setProduct(loadedProduct);
+      addRecentlyViewed({
+        id: loadedProduct.id,
+        title: loadedProduct.title,
+        slug: loadedProduct.slug || loadedProduct.id,
+        price: loadedProduct.price,
+        sale_price: loadedProduct.sale_price,
+        image_url: loadedProduct.product_images?.[0]?.image_url,
+        category_name: loadedProduct.categories?.name,
+      });
       setIsLoading(false);
     }
     fetchProduct();
@@ -883,6 +895,9 @@ export default function ProductDetailPage({ params }: { params: { slug: string }
 
       {/* PHASE 1: CUSTOMER REVIEWS & RATINGS */}
       <ProductReviews productId={product.id} productTitle={product.title} />
+
+      {/* PHASE 2: RECENTLY VIEWED PRODUCTS */}
+      <RecentlyViewedSection currentProductId={product.id} />
 
       {/* Sticky Mobile Add to Cart & Buy Now Bar (positioned above MobileBottomNav) */}
       <div className="md:hidden fixed bottom-[56px] left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border p-2.5 shadow-[0_-4px_20px_rgba(0,0,0,0.12)] z-30 flex flex-col gap-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">

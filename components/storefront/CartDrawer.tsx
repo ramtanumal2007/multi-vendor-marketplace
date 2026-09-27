@@ -8,6 +8,7 @@ import { X, Minus, Plus, ShoppingBag } from "lucide-react";
 import { useCart } from "@/lib/context/CartContext";
 import { Button } from "@/components/ui/Button";
 import { formatCurrency } from "@/lib/utils";
+import { FreeDeliveryProgress } from "@/components/storefront/FreeDeliveryProgress";
 
 export function CartDrawer() {
   const { isDrawerOpen, closeDrawer, items, updateQuantity, removeItem, subtotal } = useCart();
@@ -64,9 +65,11 @@ export function CartDrawer() {
                   }}
                   initial="hidden"
                   animate="show"
-                  className="flex flex-col gap-6"
+                  className="flex flex-col gap-5"
                 >
-                    <div className="bg-brand-grocery/10 border border-brand-grocery/20 px-3 py-2 rounded-lg flex items-center gap-2">
+                  <FreeDeliveryProgress compact subtotal={subtotal} />
+
+                  <div className="bg-brand-grocery/10 border border-brand-grocery/20 px-3 py-2 rounded-lg flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-brand-grocery animate-pulse" />
                       <span className="text-xs font-bold uppercase tracking-wider text-brand-grocery">Items from Local Express</span>
                     </div>

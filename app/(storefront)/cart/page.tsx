@@ -19,6 +19,7 @@ import {
 import { useCart } from "@/lib/context/CartContext";
 import { Button } from "@/components/ui/Button";
 import { formatCurrency } from "@/lib/utils";
+import { FreeDeliveryProgress } from "@/components/storefront/FreeDeliveryProgress";
 
 export default function CartPage() {
   const { items, subtotal, itemCount, updateQuantity, removeItem, clearCart } = useCart();
@@ -75,7 +76,10 @@ export default function CartPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
           {/* Main Column: Items Table / List */}
           <div className="lg:col-span-8 flex flex-col gap-4">
-            {/* Free Delivery Reassurance Banner */}
+            {/* Free Delivery Threshold Progress */}
+            <FreeDeliveryProgress subtotal={subtotal} />
+
+            {/* Verified Seller Reassurance Banner */}
             <div className="p-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/60 flex items-center gap-3 text-xs text-emerald-800 dark:text-emerald-300">
               <Sparkles className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <span>

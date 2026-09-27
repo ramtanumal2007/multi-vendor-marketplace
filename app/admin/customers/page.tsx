@@ -9,12 +9,14 @@ import {
   Package,
   RefreshCw,
   Filter,
+  Download,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { formatCurrency, formatExactDateTime, formatRelativeTime, formatSequentialCustomerId } from "@/lib/utils";
 import { CustomerDetailsModal } from "@/components/admin/CustomerDetailsModal";
 import { SellerDetailsModal } from "@/components/admin/SellerDetailsModal";
+import { downloadCsv } from "@/lib/exportCsv";
 
 interface CustomerProfile {
   id: string;
@@ -125,6 +127,38 @@ export default function AdminCustomersPage() {
     return matchesSearch && matchesStatus;
   });
 
+  const handleExportCsv = () => {
+    const headers = [
+      "Customer ID",
+      "Display ID",
+      "Full Name",
+      "Email",
+      "Phone",
+      "Role",
+      "Status",
+      "Total Orders",
+      "Total Spent (INR)",
+      "Last Order At",
+      "Registered At",
+    ];
+
+    const rows = filteredCustomers.map((c, idx) => [
+      c.id,
+      formatSequentialCustomerId(idx, c.customer_id_code),
+      c.full_name || "N/A",
+      c.email,
+      c.phone || "N/A",
+      c.role,
+      c.status || "active",
+      c.order_count || 0,
+      c.total_spent || 0,
+      c.last_order_at ? new Date(c.last_order_at).toISOString() : "Never",
+      new Date(c.created_at).toISOString(),
+    ]);
+
+    downloadCsv("customers", headers, rows);
+  };
+
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto h-full">
       {/* Page Header */}
@@ -135,9 +169,20 @@ export default function AdminCustomersPage() {
             View registered customer profiles, verification status, and order history.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchCustomers} isLoading={isLoading}>
-          <RefreshCw className="w-4 h-4 mr-2" /> Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportCsv}
+            disabled={filteredCustomers.length === 0}
+            className="flex items-center gap-1.5"
+          >
+            <Download className="w-4 h-4" /> Export CSV ({filteredCustomers.length})
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchCustomers} isLoading={isLoading}>
+            <RefreshCw className="w-4 h-4 mr-2" /> Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Main Container */}

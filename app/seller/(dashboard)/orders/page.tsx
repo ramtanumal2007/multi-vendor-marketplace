@@ -19,6 +19,9 @@ import {
   ShieldAlert,
   Copy,
   Check,
+  Printer,
+  ExternalLink,
+  AlertTriangle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
@@ -30,6 +33,7 @@ import {
   normalizeInternalStatus,
   formatOrderItemId,
 } from "@/lib/utils";
+import { PackingSlipModal, PackingSlipOrder } from "@/components/seller/PackingSlipModal";
 
 interface SellerOrderItem {
   id: string;
@@ -83,6 +87,7 @@ interface ProductDetailData {
 interface SellerOrder {
   id: string;
   order_number: string;
+  invoice_number?: string;
   customer_id_code: string;
   items: SellerOrderItem[];
   seller_total: number;
@@ -92,6 +97,19 @@ interface SellerOrder {
   internal_status: string;
   created_at: string;
   timeline: OrderTimelineEvent[];
+  tracking_carrier?: string | null;
+  tracking_number?: string | null;
+  is_multi_seller?: boolean;
+  shipping_address?: {
+    full_name?: string;
+    phone?: string;
+    address_line1?: string;
+    address_line2?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    country?: string;
+  } | null;
 }
 
 export default function SellerOrdersPage() {
@@ -100,6 +118,33 @@ export default function SellerOrdersPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedOrder, setSelectedOrder] = useState<SellerOrder | null>(null);
+
+  // Bulk Selection State
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [isBulkConfirmModalOpen, setIsBulkConfirmModalOpen] = useState(false);
+  const [bulkTargetStatus, setBulkTargetStatus] = useState<"CONFIRMED" | "READY TO DISPATCH" | "">("");
+  const [isProcessingBulk, setIsProcessingBulk] = useState(false);
+
+  // Shipping & Tracking State
+  const [trackingCarrierInput, setTrackingCarrierInput] = useState("Delhivery");
+  const [customCarrierName, setCustomCarrierName] = useState("");
+  const [trackingNumberInput, setTrackingNumberInput] = useState("");
+  const [isSavingTracking, setIsSavingTracking] = useState(false);
+  const [copiedTracking, setCopiedTracking] = useState(false);
+
+  // Packing Slip Modal State
+  const [packingSlipOrder, setPackingSlipOrder] = useState<PackingSlipOrder | null>(null);
+  const [storeInfo, setStoreInfo] = useState<{
+    store_name?: string;
+    store_address?: {
+      address_line1?: string;
+      city?: string;
+      state?: string;
+      postal_code?: string;
+      support_phone?: string;
+      support_email?: string;
+    } | null;
+  } | null>(null);
 
   // Product Click Drawer/Modal state
   const [isProductDrawerOpen, setIsProductDrawerOpen] = useState(false);
@@ -122,6 +167,13 @@ export default function SellerOrdersPage() {
     navigator.clipboard.writeText(idText);
     setCopiedProductId(true);
     setTimeout(() => setCopiedProductId(false), 2000);
+  };
+
+  const handleCopyTracking = (trackNum: string) => {
+    if (!trackNum) return;
+    navigator.clipboard.writeText(trackNum);
+    setCopiedTracking(true);
+    setTimeout(() => setCopiedTracking(false), 2000);
   };
 
   // Custom Note Input State
@@ -242,10 +294,67 @@ export default function SellerOrdersPage() {
           timeline: Array.isArray(row.timeline) ? row.timeline : [],
         }));
 
+        // Hydrate tracking info and shipping addresses
+        interface TrackingFetchRow {
+          id: string;
+          tracking_carrier: string | null;
+          tracking_number: string | null;
+          invoice_number: string | null;
+          shipping_address: {
+            full_name?: string;
+            phone?: string;
+            address_line1?: string;
+            address_line2?: string;
+            city?: string;
+            state?: string;
+            postal_code?: string;
+            country?: string;
+          } | null;
+        }
+
+        const rpcOrderIds = compiled.map((c) => c.id);
+        if (rpcOrderIds.length > 0) {
+          const { data: trkData } = await supabase
+            .from("orders")
+            .select("id, tracking_carrier, tracking_number, invoice_number, shipping_address")
+            .in("id", rpcOrderIds);
+          if (trkData) {
+            const trkMap = new Map((trkData as TrackingFetchRow[]).map((t) => [t.id, t]));
+            compiled.forEach((c) => {
+              const t = trkMap.get(c.id);
+              if (t) {
+                c.tracking_carrier = t.tracking_carrier;
+                c.tracking_number = t.tracking_number;
+                c.invoice_number = t.invoice_number || undefined;
+                c.shipping_address = t.shipping_address;
+              }
+            });
+
+            // Hydrate multi-seller status
+            try {
+              const { data: msData } = await supabase.rpc("get_orders_multi_seller_status", {
+                p_order_ids: rpcOrderIds,
+              });
+              if (msData && Array.isArray(msData)) {
+                const msMap = new Map((msData as { order_id: string; is_multi_seller: boolean }[]).map((m) => [m.order_id, m.is_multi_seller]));
+                compiled.forEach((c) => {
+                  c.is_multi_seller = msMap.get(c.id) || false;
+                });
+              }
+            } catch {
+              // RPC fallback
+            }
+          }
+        }
+
         setOrders(compiled);
         if (selectedOrder) {
           const refreshed = compiled.find((o) => o.id === selectedOrder.id);
-          if (refreshed) setSelectedOrder(refreshed);
+          if (refreshed) {
+            setSelectedOrder(refreshed);
+            if (refreshed.tracking_carrier) setTrackingCarrierInput(refreshed.tracking_carrier);
+            if (refreshed.tracking_number) setTrackingNumberInput(refreshed.tracking_number);
+          }
         }
         setIsLoading(false);
         return;
@@ -360,10 +469,50 @@ export default function SellerOrdersPage() {
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
 
+        // Hydrate tracking info and shipping addresses
+        if (orderIds.length > 0) {
+          const { data: trkData } = await supabase
+            .from("orders")
+            .select("id, tracking_carrier, tracking_number, invoice_number, shipping_address")
+            .in("id", orderIds);
+          if (trkData) {
+            interface FallbackTrackingRow {
+              id: string;
+              tracking_carrier: string | null;
+              tracking_number: string | null;
+              invoice_number: string | null;
+              shipping_address: {
+                full_name?: string;
+                phone?: string;
+                address_line1?: string;
+                address_line2?: string;
+                city?: string;
+                state?: string;
+                postal_code?: string;
+                country?: string;
+              } | null;
+            }
+            const trkMap = new Map((trkData as FallbackTrackingRow[]).map((t) => [t.id, t]));
+            compiled.forEach((c) => {
+              const t = trkMap.get(c.id);
+              if (t) {
+                c.tracking_carrier = t.tracking_carrier;
+                c.tracking_number = t.tracking_number;
+                c.invoice_number = t.invoice_number || undefined;
+                c.shipping_address = t.shipping_address;
+              }
+            });
+          }
+        }
+
         setOrders(compiled);
         if (selectedOrder) {
           const refreshed = compiled.find((o) => o.id === selectedOrder.id);
-          if (refreshed) setSelectedOrder(refreshed);
+          if (refreshed) {
+            setSelectedOrder(refreshed);
+            if (refreshed.tracking_carrier) setTrackingCarrierInput(refreshed.tracking_carrier);
+            if (refreshed.tracking_number) setTrackingNumberInput(refreshed.tracking_number);
+          }
         }
       } else {
         setOrders([]);
@@ -496,7 +645,220 @@ export default function SellerOrdersPage() {
     }
   };
 
-  // Filter orders by search & status
+  // Fetch store details for packing slip
+  useEffect(() => {
+    const fetchStore = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("stores")
+        .select("store_name, store_address, phone, email")
+        .eq("seller_id", user.id)
+        .maybeSingle();
+      if (data) setStoreInfo(data);
+    };
+    fetchStore();
+  }, []);
+
+  const handleOpenPackingSlip = (ord: SellerOrder) => {
+    setPackingSlipOrder({
+      id: ord.id,
+      order_number: ord.order_number,
+      created_at: ord.created_at,
+      payment_method: ord.payment_method,
+      payment_status: ord.payment_status,
+      tracking_carrier: ord.tracking_carrier,
+      tracking_number: ord.tracking_number,
+      seller_total: ord.seller_total,
+      items: ord.items.map((i) => ({
+        id: i.id,
+        title: i.title,
+        sku: i.sku,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        line_total: i.line_total,
+      })),
+      store: {
+        name: storeInfo?.store_name || "Vendosmith Merchant Store",
+        address_line1: storeInfo?.store_address?.address_line1,
+        city: storeInfo?.store_address?.city,
+        state: storeInfo?.store_address?.state,
+        postal_code: storeInfo?.store_address?.postal_code,
+        phone: storeInfo?.store_address?.support_phone,
+      },
+      shipping_address: ord.shipping_address
+        ? {
+            first_name: ord.shipping_address.full_name || ord.customer_id_code,
+            address_line1: ord.shipping_address.address_line1,
+            address_line2: ord.shipping_address.address_line2,
+            city: ord.shipping_address.city,
+            state: ord.shipping_address.state,
+            postal_code: ord.shipping_address.postal_code,
+            phone: ord.shipping_address.phone,
+          }
+        : null,
+    });
+  };
+
+  const handleSaveTracking = async (orderId: string) => {
+    if (selectedOrder?.is_multi_seller) {
+      addToast({
+        title: "Multi-Seller Order",
+        description: "Tracking for multi-seller orders will be available after shipment separation is supported.",
+        type: "info",
+      });
+      return;
+    }
+
+    const finalCarrier = trackingCarrierInput === "Other" ? customCarrierName.trim() : trackingCarrierInput.trim();
+    if (!finalCarrier || !trackingNumberInput.trim()) {
+      addToast({
+        title: "Missing Information",
+        description: "Please specify both the logistics carrier and AWB tracking number.",
+        type: "error",
+      });
+      return;
+    }
+
+    if (trackingNumberInput.trim().length < 4 || trackingNumberInput.trim().length > 35) {
+      addToast({
+        title: "Invalid Tracking Number",
+        description: "Tracking / AWB numbers are typically between 4 and 35 alphanumeric characters.",
+        type: "error",
+      });
+      return;
+    }
+
+    setIsSavingTracking(true);
+    try {
+      const { error: updateErr } = await supabase
+        .from("orders")
+        .update({
+          tracking_carrier: finalCarrier,
+          tracking_number: trackingNumberInput.trim(),
+        })
+        .eq("id", orderId);
+
+      if (updateErr) throw updateErr;
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      await supabase.from("order_timeline").insert({
+        order_id: orderId,
+        status: selectedOrder?.internal_status || "CONFIRMED",
+        note: `Dispatched via ${finalCarrier} (AWB / Tracking #: ${trackingNumberInput.trim()})`,
+        created_by: user?.id,
+      });
+
+      addToast({
+        title: "Tracking Details Updated",
+        description: `AWB ${trackingNumberInput.trim()} saved for order #${selectedOrder?.order_number}.`,
+        type: "success",
+      });
+
+      fetchSellerOrders();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to save tracking details.";
+      addToast({
+        title: "Save Failed",
+        description: message,
+        type: "error",
+      });
+    } finally {
+      setIsSavingTracking(false);
+    }
+  };
+
+  const getTrackingUrl = (carrier?: string | null, trackingNumber?: string | null) => {
+    if (!trackingNumber) return null;
+    const c = (carrier || "").toLowerCase();
+    if (c.includes("delhivery")) return `https://www.delhivery.com/track/package/${trackingNumber}`;
+    if (c.includes("bluedart")) return `https://www.bluedart.com/tracking?trackNumber=${trackingNumber}`;
+    if (c.includes("india post") || c.includes("indiapost")) return `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`;
+    if (c.includes("ekart")) return `https://ekartlogistics.com/shipmenttrack/${trackingNumber}`;
+    if (c.includes("xpressbees")) return `https://www.xpressbees.com/track?tracking_id=${trackingNumber}`;
+    if (c.includes("shadowfax")) return `https://tracker.shadowfax.in/#/track?tracking_id=${trackingNumber}`;
+    if (c.includes("dtdc")) return `https://www.dtdc.in/tracking/tracking_results.asp?trkid=${trackingNumber}`;
+    return `https://www.google.com/search?q=${encodeURIComponent(`${carrier || "courier"} tracking ${trackingNumber}`)}`;
+  };
+
+  const handleToggleSelectOrder = (orderId: string) => {
+    setSelectedOrderIds((prev) =>
+      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+    );
+  };
+
+  const handleSelectAllOrders = () => {
+    if (selectedOrderIds.length === filteredOrders.length) {
+      setSelectedOrderIds([]);
+    } else {
+      setSelectedOrderIds(filteredOrders.map((o) => o.id));
+    }
+  };
+
+  const handleExecuteBulkStatus = async () => {
+    if (!bulkTargetStatus) return;
+
+    const eligibleOrders = orders.filter(
+      (o) =>
+        selectedOrderIds.includes(o.id) &&
+        ((bulkTargetStatus === "CONFIRMED" && o.internal_status === "ORDERED") ||
+          (bulkTargetStatus === "READY TO DISPATCH" && o.internal_status === "CONFIRMED"))
+    );
+
+    if (eligibleOrders.length === 0) {
+      addToast({
+        title: "No Eligible Orders",
+        description: `None of the selected orders can transition to ${bulkTargetStatus}.`,
+        type: "info",
+      });
+      setIsBulkConfirmModalOpen(false);
+      return;
+    }
+
+    setIsProcessingBulk(true);
+
+    try {
+      const eligibleIds = eligibleOrders.map((o) => o.id);
+      const noteText =
+        bulkTargetStatus === "CONFIRMED"
+          ? "Order confirmed via bulk action. Packing in progress."
+          : "Order packed and marked ready for logistics dispatch via bulk action.";
+
+      // Execute server-side atomic bulk transition
+      const { data: rpcData, error: rpcErr } = await supabase.rpc("bulk_update_seller_orders", {
+        p_order_ids: eligibleIds,
+        p_target_status: bulkTargetStatus,
+        p_note: noteText,
+      });
+
+      if (rpcErr) throw rpcErr;
+
+      const updatedCount = rpcData?.updated_count ?? eligibleIds.length;
+
+      addToast({
+        title: "Bulk Update Successful",
+        description: `Successfully transitioned ${updatedCount} orders to ${bulkTargetStatus} atomically.`,
+        type: "success",
+      });
+
+      setSelectedOrderIds([]);
+      setIsBulkConfirmModalOpen(false);
+      fetchSellerOrders();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to execute bulk status update.";
+      addToast({
+        title: "Bulk Update Failed",
+        description: message,
+        type: "error",
+      });
+    } finally {
+      setIsProcessingBulk(false);
+    }
+  };
   const filteredOrders = orders.filter((ord) => {
     const term = searchTerm.toLowerCase();
     const matchesSearch =
@@ -578,6 +940,15 @@ export default function SellerOrdersPage() {
             <table className="w-full text-left border-collapse min-w-[950px] text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider sticky top-0 z-10">
+                  <th className="p-4 w-12 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all orders"
+                      checked={filteredOrders.length > 0 && selectedOrderIds.length === filteredOrders.length}
+                      onChange={handleSelectAllOrders}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                  </th>
                   <th className="p-4">Order & Date</th>
                   <th className="p-4">Customer ID</th>
                   <th className="p-4">Products & Quantity</th>
@@ -594,6 +965,15 @@ export default function SellerOrdersPage() {
 
                   return (
                     <tr key={ord.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="p-4 align-top w-12 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select order #${ord.order_number}`}
+                          checked={selectedOrderIds.includes(ord.id)}
+                          onChange={() => handleToggleSelectOrder(ord.id)}
+                          className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-1"
+                        />
+                      </td>
                       <td className="p-4 align-top">
                         <div className="font-bold text-slate-900">#{ord.order_number}</div>
                         <div className="text-slate-500 text-xs mt-0.5">
@@ -697,12 +1077,25 @@ export default function SellerOrdersPage() {
                       </td>
 
                       <td className="p-4 align-top text-right space-y-2">
-                        <button
-                          onClick={() => setSelectedOrder(ord)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl text-xs font-semibold transition-colors"
-                        >
-                          <Eye className="w-3.5 h-3.5" /> Details & Updates
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                          <button
+                            onClick={() => handleOpenPackingSlip(ord)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors"
+                            title="Generate Packing Slip"
+                          >
+                            <Printer className="w-3.5 h-3.5 text-slate-500" /> Slip
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedOrder(ord);
+                              setTrackingCarrierInput(ord.tracking_carrier || "Delhivery");
+                              setTrackingNumberInput(ord.tracking_number || "");
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-semibold transition-colors"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> Details
+                          </button>
+                        </div>
 
                         {/* Seller Control Buttons */}
                         {isSellerControlled ? (
@@ -861,6 +1254,133 @@ export default function SellerOrdersPage() {
                 </div>
               </div>
 
+              {/* Courier & Tracking (AWB) Management Card */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Truck className="w-4 h-4 text-blue-600" />
+                    <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
+                      Logistics Courier & Tracking (AWB)
+                    </h3>
+                  </div>
+                  {selectedOrder.tracking_number ? (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full">
+                      AWB Assigned
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full">
+                      AWB Not Set
+                    </span>
+                  )}
+                </div>
+
+                {/* Current Tracking View if exists */}
+                {selectedOrder.tracking_number ? (
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] text-slate-400 font-medium">Carrier & Waybill Number</div>
+                      <div className="font-mono font-bold text-slate-900 text-sm flex items-center gap-2 mt-0.5">
+                        <span className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded font-semibold text-xs border border-blue-100">
+                          {selectedOrder.tracking_carrier || "Standard Courier"}
+                        </span>
+                        <span>{selectedOrder.tracking_number}</span>
+                        <button
+                          onClick={() => handleCopyTracking(selectedOrder.tracking_number!)}
+                          className="text-slate-400 hover:text-slate-700 p-1 rounded hover:bg-slate-100 transition-colors"
+                          title="Copy AWB number"
+                        >
+                          {copiedTracking ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {getTrackingUrl(selectedOrder.tracking_carrier, selectedOrder.tracking_number) && (
+                        <a
+                          href={getTrackingUrl(selectedOrder.tracking_carrier, selectedOrder.tracking_number)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold transition-colors"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" /> Track Package
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500">
+                    Assign your courier partner and Air Waybill (AWB) tracking number so the customer can track their delivery live.
+                  </p>
+                )}
+
+                {/* Update Tracking Form */}
+                {selectedOrder.is_multi_seller ? (
+                  <div className="p-3.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs">
+                      <span className="font-semibold block text-amber-900 mb-0.5">Multi-Seller Order</span>
+                      Tracking for multi-seller orders will be available after shipment separation is supported.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1">
+                    <div className="sm:col-span-4">
+                      <label className="text-[10px] font-semibold text-slate-500 block mb-1">Carrier / Courier</label>
+                      <select
+                        value={trackingCarrierInput}
+                        onChange={(e) => setTrackingCarrierInput(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="Delhivery">Delhivery</option>
+                        <option value="BlueDart">BlueDart</option>
+                        <option value="Ekart Logistics">Ekart Logistics</option>
+                        <option value="India Post">India Post</option>
+                        <option value="DTDC">DTDC</option>
+                        <option value="Xpressbees">Xpressbees</option>
+                        <option value="Shadowfax">Shadowfax</option>
+                        <option value="Other">Other / Self Ship</option>
+                      </select>
+                    </div>
+
+                    {trackingCarrierInput === "Other" && (
+                      <div className="sm:col-span-4">
+                        <label className="text-[10px] font-semibold text-slate-500 block mb-1">Custom Carrier Name</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Local Express"
+                          value={customCarrierName}
+                          onChange={(e) => setCustomCarrierName(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    <div className={trackingCarrierInput === "Other" ? "sm:col-span-5" : "sm:col-span-6"}>
+                      <label className="text-[10px] font-semibold text-slate-500 block mb-1">AWB / Tracking Number</label>
+                      <input
+                        type="text"
+                        placeholder="Enter consignment/AWB #..."
+                        value={trackingNumberInput}
+                        onChange={(e) => setTrackingNumberInput(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className={trackingCarrierInput === "Other" ? "sm:col-span-3 flex items-end" : "sm:col-span-2 flex items-end"}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => handleSaveTracking(selectedOrder.id)}
+                        isLoading={isSavingTracking}
+                        disabled={!trackingNumberInput.trim()}
+                        className="w-full h-8 text-xs font-bold"
+                      >
+                        Save AWB
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Custom Customer Message Post Area (If seller control active for custom updates) */}
               {["ORDERED", "CONFIRMED", "READY TO DISPATCH"].includes(selectedOrder.internal_status) ? (
                 <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-xl space-y-3">
@@ -965,13 +1485,130 @@ export default function SellerOrdersPage() {
             </div>
 
             {/* Footer */}
-            <div className="flex justify-end pt-3 border-t border-slate-100 flex-shrink-0">
+            <div className="flex justify-between items-center pt-3 border-t border-slate-100 flex-shrink-0">
+              <button
+                onClick={() => handleOpenPackingSlip(selectedOrder)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-colors shadow-xs"
+              >
+                <Printer className="w-4 h-4 text-slate-600" /> Print Packing Slip
+              </button>
               <Button variant="outline" size="sm" onClick={() => setSelectedOrder(null)}>
                 Close
               </Button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Floating Bulk Action Bar */}
+      {selectedOrderIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-4 border border-slate-700/80 animate-in slide-in-from-bottom duration-200 max-w-[95vw] flex-wrap justify-center">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">
+              {selectedOrderIds.length}
+            </span>
+            <span className="text-xs font-semibold whitespace-nowrap">Selected</span>
+          </div>
+          <div className="h-5 w-px bg-slate-700 hidden sm:block" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                setBulkTargetStatus("CONFIRMED");
+                setIsBulkConfirmModalOpen(true);
+              }}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Confirm Selected ({orders.filter(o => selectedOrderIds.includes(o.id) && o.internal_status === "ORDERED").length})
+            </button>
+            <button
+              onClick={() => {
+                setBulkTargetStatus("READY TO DISPATCH");
+                setIsBulkConfirmModalOpen(true);
+              }}
+              className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm"
+            >
+              <Truck className="w-3.5 h-3.5" />
+              Mark Ready to Dispatch ({orders.filter(o => selectedOrderIds.includes(o.id) && o.internal_status === "CONFIRMED").length})
+            </button>
+            <button
+              onClick={() => setSelectedOrderIds([])}
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Status Confirmation Modal */}
+      {isBulkConfirmModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl flex-shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">Confirm Bulk Status Update</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  You are about to batch transition selected orders to <span className="font-bold text-slate-800">{bulkTargetStatus}</span>.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Total Selected:</span>
+                <span className="font-bold text-slate-800">{selectedOrderIds.length} orders</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Eligible for transition:</span>
+                <span className="font-bold text-emerald-600">
+                  {orders.filter(o => selectedOrderIds.includes(o.id) && ((bulkTargetStatus === "CONFIRMED" && o.internal_status === "ORDERED") || (bulkTargetStatus === "READY TO DISPATCH" && o.internal_status === "CONFIRMED"))).length} orders
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Ineligible (Skipped safely):</span>
+                <span className="font-bold text-amber-600">
+                  {orders.filter(o => selectedOrderIds.includes(o.id) && !((bulkTargetStatus === "CONFIRMED" && o.internal_status === "ORDERED") || (bulkTargetStatus === "READY TO DISPATCH" && o.internal_status === "CONFIRMED"))).length} orders
+                </span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400">
+              Only orders in valid preceding statuses will be updated in compliance with seller marketplace safety rules.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsBulkConfirmModalOpen(false)}
+                disabled={isProcessingBulk}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleExecuteBulkStatus}
+                isLoading={isProcessingBulk}
+              >
+                Proceed with Update
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Packing Slip Printable Document Modal */}
+      {packingSlipOrder && (
+        <PackingSlipModal
+          order={packingSlipOrder}
+          isOpen={!!packingSlipOrder}
+          onClose={() => setPackingSlipOrder(null)}
+        />
       )}
 
       {/* Seller Product Details Drawer / Modal */}

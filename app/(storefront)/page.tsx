@@ -26,6 +26,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { ProductCard } from "@/components/ui/ProductCard";
 import { PromotionalGridBanner } from "@/components/storefront/PromotionalGridBanner";
+import { RecentlyViewedSection } from "@/components/storefront/RecentlyViewedSection";
 import { createClient } from "@/lib/supabase";
 import { useToast } from "@/components/ui/Toast";
 import { useCart } from "@/lib/context/CartContext";
@@ -671,6 +672,11 @@ export default function Homepage() {
           </div>
         </section>
       )}
+
+      {/* PHASE 2: RECENTLY VIEWED PRODUCTS */}
+      <div className="max-w-[1440px] mx-auto px-4 md:px-12 w-full">
+        <RecentlyViewedSection />
+      </div>
 
       {/* 6. TRUST & VERIFICATION FOOTNOTE */}
       <section className="py-12 px-4 md:px-12 max-w-[1440px] mx-auto w-full text-center">

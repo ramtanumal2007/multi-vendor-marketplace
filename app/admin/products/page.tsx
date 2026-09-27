@@ -3,7 +3,20 @@
 export const dynamic = "force-dynamic";
 
 import React, { useState, useEffect } from "react";
-import { Plus, Search, Filter, MoreHorizontal, Edit, Trash2 } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Filter,
+  Edit,
+  Trash2,
+  CheckCircle2,
+  XCircle,
+  Eye,
+  Download,
+  AlertTriangle,
+  Clock,
+  RefreshCw,
+} from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -12,6 +25,7 @@ import { ImageUploader, UploadedImageItem } from "@/components/ui/ImageUploader"
 import { extractStoragePath } from "@/lib/imageOptimizer";
 import { generateMarketplaceSKU, getSKUPreview, normalizeSKU, checkSKUExists } from "@/lib/skuGenerator";
 import { createClient } from "@/lib/supabase";
+import { downloadCsv } from "@/lib/exportCsv";
 
 interface CategoryItem {
   id: string;
@@ -21,6 +35,7 @@ interface CategoryItem {
 interface StoreItem {
   id: string;
   name: string;
+  seller_id?: string;
   status?: string;
 }
 
@@ -39,18 +54,28 @@ interface ProductItem {
   tax_rate?: number | null;
   delivery_fee?: number | null;
   categories?: { id: string; name: string } | null;
-  stores?: { id: string; name: string } | null;
+  stores?: { id: string; name: string; seller_id?: string } | null;
   product_images?: Array<{ id?: string; image_url: string }>;
 }
 
 export default function AdminProductsPage() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusTab, setStatusTab] = useState<"all" | "pending_review" | "active" | "rejected" | "draft">("all");
+  const [storeFilter, setStoreFilter] = useState("all");
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isMetaLoading, setIsMetaLoading] = useState(true);
   const [metaError, setMetaError] = useState<string | null>(null);
+
+  // Moderation state
+  const [previewProduct, setPreviewProduct] = useState<ProductItem | null>(null);
+  const [moderationProduct, setModerationProduct] = useState<ProductItem | null>(null);
+  const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [isSubmittingModeration, setIsSubmittingModeration] = useState(false);
 
   // Modals & form state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -83,7 +108,7 @@ export default function AdminProductsPage() {
     setIsLoading(true);
     const { data: productsData, error: prodError } = await supabase
       .from("products")
-      .select("*, categories(id, name), product_images(id, image_url), stores(id, name)")
+      .select("*, categories(id, name), product_images(id, image_url), stores(id, name, seller_id)")
       .order("created_at", { ascending: false });
 
     if (prodError) {
@@ -444,39 +469,302 @@ export default function AdminProductsPage() {
     }
   };
 
-  const filteredProducts = products.filter((p) =>
-    (p.title || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (p.sku || "").toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleApproveProduct = async (product: ProductItem) => {
+    setIsSubmittingModeration(true);
+    try {
+      const { error } = await supabase
+        .from("products")
+        .update({ status: "active" })
+        .eq("id", product.id);
+
+      if (error) throw error;
+
+      // Notify seller if store has seller_id
+      const sellerId = product.stores?.seller_id;
+      if (sellerId) {
+        await supabase.from("seller_notifications").insert({
+          seller_id: sellerId,
+          title: "Product Listing Approved",
+          message: `Your product "${product.title}" has been reviewed, approved, and published live to the marketplace.`,
+          type: "approval",
+          priority: "high",
+        });
+      }
+
+      addToast({
+        title: "Product Approved",
+        description: `"${product.title}" is now active and published.`,
+        type: "success",
+      });
+
+      setIsApproveModalOpen(false);
+      setModerationProduct(null);
+      if (previewProduct?.id === product.id) {
+        setPreviewProduct((prev) => (prev ? { ...prev, status: "active" } : null));
+      }
+      fetchProductsData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to approve product.";
+      addToast({ title: "Approval Failed", description: msg, type: "error" });
+    } finally {
+      setIsSubmittingModeration(false);
+    }
+  };
+
+  const handleRejectProduct = async (product: ProductItem) => {
+    if (!rejectionReason.trim()) {
+      addToast({
+        title: "Rejection Reason Required",
+        description: "Please specify why this product is being rejected so the seller can rectify it.",
+        type: "info",
+      });
+      return;
+    }
+
+    setIsSubmittingModeration(true);
+    try {
+      const { error } = await supabase
+        .from("products")
+        .update({ status: "rejected" })
+        .eq("id", product.id);
+
+      if (error) throw error;
+
+      // Notify seller with reason
+      const sellerId = product.stores?.seller_id;
+      if (sellerId) {
+        await supabase.from("seller_notifications").insert({
+          seller_id: sellerId,
+          title: "Product Listing Rejected",
+          message: `Your product "${product.title}" was not approved. Reason: ${rejectionReason.trim()}`,
+          type: "warning",
+          priority: "high",
+        });
+      }
+
+      addToast({
+        title: "Product Rejected",
+        description: `"${product.title}" was marked as rejected and seller was notified.`,
+        type: "info",
+      });
+
+      setIsRejectModalOpen(false);
+      setModerationProduct(null);
+      setRejectionReason("");
+      if (previewProduct?.id === product.id) {
+        setPreviewProduct((prev) => (prev ? { ...prev, status: "rejected" } : null));
+      }
+      fetchProductsData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to reject product.";
+      addToast({ title: "Rejection Failed", description: msg, type: "error" });
+    } finally {
+      setIsSubmittingModeration(false);
+    }
+  };
+
+  const handleExportCsv = () => {
+    if (filteredProducts.length === 0) {
+      addToast({ title: "No Data", description: "No products match current filters to export.", type: "info" });
+      return;
+    }
+
+    const headers = [
+      "Product ID",
+      "Title",
+      "SKU",
+      "Category",
+      "Store Name",
+      "Regular Price",
+      "Sale Price",
+      "Stock Quantity",
+      "Status",
+      "Tax Rate (%)",
+      "Delivery Fee",
+    ];
+
+    const rows = filteredProducts.map((p) => [
+      p.id,
+      p.title,
+      p.sku || "N/A",
+      p.categories?.name || "Uncategorized",
+      p.stores?.name || "Platform",
+      p.price,
+      p.sale_price || "",
+      p.stock_quantity ?? 0,
+      p.status,
+      p.tax_rate ?? 0,
+      p.delivery_fee ?? 0,
+    ]);
+
+    downloadCsv(`products_${statusTab}`, headers, rows);
+    addToast({
+      title: "Export Completed",
+      description: `Exported ${filteredProducts.length} product(s) to CSV.`,
+      type: "success",
+    });
+  };
+
+  const filteredProducts = products.filter((p) => {
+    const matchesSearch =
+      (p.title || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.sku || "").toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = statusTab === "all" || p.status === statusTab;
+    const matchesStore = storeFilter === "all" || p.store_id === storeFilter;
+    return matchesSearch && matchesStatus && matchesStore;
+  });
+
+  const pendingCount = products.filter((p) => p.status === "pending_review").length;
+  const activeCount = products.filter((p) => p.status === "active").length;
+  const rejectedCount = products.filter((p) => p.status === "rejected").length;
+  const draftCount = products.filter((p) => p.status === "draft").length;
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto h-full">
-      <div className="flex justify-between items-center">
+    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto h-full pb-12">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Products</h1>
-          <p className="text-sm text-slate-500 mt-1">Manage your store&apos;s products, pricing, and inventory.</p>
+          <h1 className="text-2xl font-bold text-slate-900">Products & Moderation</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Review merchant listings, manage catalog pricing, and supervise marketplace inventory.
+          </p>
         </div>
-        <Button variant="primary" onClick={handleOpenAddModal} className="flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Add Product
-        </Button>
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="outline"
+            onClick={handleExportCsv}
+            className="flex items-center gap-2 text-slate-700 bg-white hover:bg-slate-50 border-slate-300 rounded-xl text-xs font-bold"
+          >
+            <Download className="w-4 h-4 text-slate-500" /> Export CSV
+          </Button>
+          <Button variant="primary" onClick={handleOpenAddModal} className="flex items-center gap-2 text-xs font-bold">
+            <Plus className="w-4 h-4" /> Add Product
+          </Button>
+        </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
+      {/* Moderation Status Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-200 overflow-x-auto pb-px">
+        <button
+          onClick={() => setStatusTab("all")}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all flex items-center gap-2 whitespace-nowrap border-b-2 ${
+            statusTab === "all"
+              ? "border-blue-600 text-blue-600 bg-white shadow-2xs"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+          }`}
+        >
+          All Products
+          <span className="px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-700 font-semibold">
+            {products.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStatusTab("pending_review")}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all flex items-center gap-2 whitespace-nowrap border-b-2 ${
+            statusTab === "pending_review"
+              ? "border-amber-500 text-amber-800 bg-amber-50/60 shadow-2xs"
+              : "border-transparent text-slate-500 hover:text-amber-700 hover:bg-amber-50/30"
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5 text-amber-600" />
+          Pending Moderation
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              pendingCount > 0
+                ? "bg-amber-500 text-white animate-pulse"
+                : "bg-amber-100 text-amber-800"
+            }`}
+          >
+            {pendingCount}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStatusTab("active")}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all flex items-center gap-2 whitespace-nowrap border-b-2 ${
+            statusTab === "active"
+              ? "border-emerald-600 text-emerald-800 bg-emerald-50/60 shadow-2xs"
+              : "border-transparent text-slate-500 hover:text-emerald-700 hover:bg-emerald-50/30"
+          }`}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+          Active
+          <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-800 font-semibold">
+            {activeCount}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStatusTab("rejected")}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all flex items-center gap-2 whitespace-nowrap border-b-2 ${
+            statusTab === "rejected"
+              ? "border-red-600 text-red-800 bg-red-50/60 shadow-2xs"
+              : "border-transparent text-slate-500 hover:text-red-700 hover:bg-red-50/30"
+          }`}
+        >
+          <XCircle className="w-3.5 h-3.5 text-red-600" />
+          Rejected
+          <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-100 text-red-800 font-semibold">
+            {rejectedCount}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStatusTab("draft")}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all flex items-center gap-2 whitespace-nowrap border-b-2 ${
+            statusTab === "draft"
+              ? "border-slate-600 text-slate-900 bg-slate-100/60 shadow-2xs"
+              : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          Draft
+          <span className="px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-700 font-semibold">
+            {draftCount}
+          </span>
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
         {/* Toolbar */}
-        <div className="p-4 border-b border-slate-200 flex justify-between items-center gap-4 bg-slate-50/50">
-          <div className="relative flex-1 max-w-md">
+        <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-50/50">
+          <div className="relative flex-1 max-w-md w-full">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search products by name or SKU..."
+              placeholder="Search products by title or SKU..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all"
+              className="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
             />
           </div>
-          <Button variant="outline" className="flex items-center gap-2 text-slate-600 bg-white">
-            <Filter className="w-4 h-4" /> Filters
-          </Button>
+
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-between flex-wrap">
+            <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-3 py-1.5">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={storeFilter}
+                onChange={(e) => setStoreFilter(e.target.value)}
+                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none cursor-pointer"
+              >
+                <option value="all">All Merchant Stores</option>
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchProductsData}
+              className="flex items-center gap-1.5 text-slate-700 bg-white hover:bg-slate-50 border-slate-300 rounded-xl text-xs font-semibold h-9"
+              title="Refresh products"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
 
         {/* Table */}
@@ -553,37 +841,69 @@ export default function AdminProductsPage() {
                     <td className="px-6 py-4 text-right text-slate-600">{product.stock_quantity ?? 0}</td>
                     <td className="px-6 py-4 text-center">
                       <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
                           product.status === "active"
-                            ? "bg-green-100 text-green-800"
+                            ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
                             : product.status === "draft"
-                            ? "bg-slate-100 text-slate-800"
+                            ? "bg-slate-100 text-slate-700 border border-slate-200"
                             : product.status === "pending_review"
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-red-100 text-red-800"
+                            ? "bg-amber-100 text-amber-900 border border-amber-300 font-extrabold"
+                            : "bg-red-100 text-red-800 border border-red-200"
                         }`}
                       >
+                        {product.status === "pending_review" && <Clock className="w-3 h-3 text-amber-700" />}
+                        {product.status === "active" && <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                        {product.status === "rejected" && <XCircle className="w-3 h-3 text-red-600" />}
                         {(product.status || "draft").replace("_", " ").toUpperCase()}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                        {product.status === "pending_review" && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setModerationProduct(product);
+                                setIsApproveModalOpen(true);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors shadow-2xs"
+                              title="Approve Listing"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                            </button>
+                            <button
+                              onClick={() => {
+                                setModerationProduct(product);
+                                setRejectionReason("");
+                                setIsRejectModalOpen(true);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors shadow-2xs"
+                              title="Reject Listing"
+                            >
+                              <XCircle className="w-3.5 h-3.5" /> Reject
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => setPreviewProduct(product)}
+                          title="Preview Product"
+                          className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => handleOpenEditModal(product)}
                           title="Edit Product"
-                          className="p-1.5 text-slate-400 hover:text-accent hover:bg-blue-50 rounded transition-colors"
+                          className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         >
                           <Edit className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleOpenDeleteModal(product)}
                           title="Delete Product"
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                          className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
-                        <button className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors">
-                          <MoreHorizontal className="w-4 h-4" />
                         </button>
                       </div>
                     </td>
@@ -970,6 +1290,224 @@ export default function AdminProductsPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Moderation Approve Confirmation Modal */}
+      <Modal
+        isOpen={isApproveModalOpen}
+        onClose={() => setIsApproveModalOpen(false)}
+        title="Approve Product Listing"
+      >
+        <div className="space-y-4 text-left mt-2">
+          <div className="flex items-start gap-3 p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-emerald-950">
+              <span className="font-bold block">Ready to Publish Live</span>
+              Approving will publish <strong>{moderationProduct?.title}</strong> to the marketplace customer storefront.
+              The merchant will be notified.
+            </div>
+          </div>
+          <div className="text-xs text-slate-500 space-y-1">
+            <p><strong>Merchant Store:</strong> {moderationProduct?.stores?.name || "Platform"}</p>
+            <p><strong>Price:</strong> {formatCurrency(moderationProduct?.price || 0)}</p>
+            <p><strong>SKU:</strong> {moderationProduct?.sku || "N/A"}</p>
+          </div>
+          <div className="pt-4 flex justify-end gap-2 border-t border-slate-200">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsApproveModalOpen(false)}
+              disabled={isSubmittingModeration}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+              onClick={() => moderationProduct && handleApproveProduct(moderationProduct)}
+              isLoading={isSubmittingModeration}
+            >
+              Approve & Publish
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Moderation Reject Confirmation Modal */}
+      <Modal
+        isOpen={isRejectModalOpen}
+        onClose={() => setIsRejectModalOpen(false)}
+        title="Reject Product Listing"
+      >
+        <div className="space-y-4 text-left mt-2">
+          <div className="flex items-start gap-3 p-3 bg-red-50 rounded-xl border border-red-200">
+            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-red-950">
+              <span className="font-bold block">Listing Rejection</span>
+              Rejecting will keep <strong>{moderationProduct?.title}</strong> off the storefront and dispatch your reason
+              directly to the seller.
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-700 block mb-1">
+              Rejection Reason <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              rows={3}
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              placeholder="e.g. Incomplete description, blurry images, or copyright trademark violation..."
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-red-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="pt-4 flex justify-end gap-2 border-t border-slate-200">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsRejectModalOpen(false)}
+              disabled={isSubmittingModeration}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs"
+              onClick={() => moderationProduct && handleRejectProduct(moderationProduct)}
+              isLoading={isSubmittingModeration}
+              disabled={!rejectionReason.trim()}
+            >
+              Confirm Rejection
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Product Preview Drawer / Modal */}
+      {previewProduct && (
+        <Modal
+          isOpen={!!previewProduct}
+          onClose={() => setPreviewProduct(null)}
+          title={`Product Preview: ${previewProduct.title}`}
+        >
+          <div className="space-y-5 text-left mt-2 max-h-[75vh] overflow-y-auto pr-1">
+            {/* Image Preview Carousel / Gallery */}
+            <div className="w-full h-56 bg-slate-100 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center p-2 relative">
+              {previewProduct.product_images?.[0]?.image_url ? (
+                <img
+                  src={previewProduct.product_images[0].image_url}
+                  alt={previewProduct.title}
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <div className="text-slate-400 text-xs">No product image uploaded</div>
+              )}
+              <span
+                className={`absolute top-3 right-3 px-2.5 py-1 rounded-full text-xs font-bold shadow-xs ${
+                  previewProduct.status === "active"
+                    ? "bg-emerald-600 text-white"
+                    : previewProduct.status === "pending_review"
+                    ? "bg-amber-500 text-white"
+                    : previewProduct.status === "rejected"
+                    ? "bg-red-600 text-white"
+                    : "bg-slate-700 text-white"
+                }`}
+              >
+                {previewProduct.status.toUpperCase()}
+              </span>
+            </div>
+
+            {/* Pricing & Key Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+              <div>
+                <span className="text-slate-400 block font-medium">Regular Price</span>
+                <span className="font-bold text-slate-900 text-sm">{formatCurrency(previewProduct.price)}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block font-medium">Sale Price</span>
+                <span className="font-bold text-emerald-600 text-sm">
+                  {previewProduct.sale_price ? formatCurrency(previewProduct.sale_price) : "None"}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block font-medium">Inventory Stock</span>
+                <span className="font-bold text-slate-900 text-sm">{previewProduct.stock_quantity ?? 0} units</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block font-medium">Tax Rate</span>
+                <span className="font-bold text-slate-900 text-sm">{previewProduct.tax_rate ?? 0}%</span>
+              </div>
+            </div>
+
+            {/* Specifications */}
+            <div className="space-y-2 text-xs">
+              <h4 className="font-bold text-slate-900 uppercase tracking-wider text-[11px]">Listing Specifications</h4>
+              <div className="grid grid-cols-2 gap-2 p-3 bg-white rounded-xl border border-slate-200">
+                <div>
+                  <span className="text-slate-400 block">SKU</span>
+                  <span className="font-mono font-bold text-slate-800">{previewProduct.sku || "N/A"}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Category</span>
+                  <span className="font-bold text-slate-800">{previewProduct.categories?.name || "Uncategorized"}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Merchant Store</span>
+                  <span className="font-bold text-blue-700">{previewProduct.stores?.name || "Platform Direct"}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Delivery Fee</span>
+                  <span className="font-bold text-slate-800">
+                    {previewProduct.delivery_fee ? formatCurrency(previewProduct.delivery_fee) : "Standard"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="space-y-1.5 text-xs">
+              <h4 className="font-bold text-slate-900 uppercase tracking-wider text-[11px]">Description</h4>
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 leading-relaxed max-h-32 overflow-y-auto">
+                {previewProduct.description || "No description provided."}
+              </div>
+            </div>
+
+            {/* Moderation Controls in Preview */}
+            <div className="pt-3 border-t border-slate-200 flex justify-between items-center">
+              <div className="flex gap-2">
+                {previewProduct.status === "pending_review" && (
+                  <>
+                    <Button
+                      type="button"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                      onClick={() => {
+                        setModerationProduct(previewProduct);
+                        setIsApproveModalOpen(true);
+                      }}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Approve
+                    </Button>
+                    <Button
+                      type="button"
+                      className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs"
+                      onClick={() => {
+                        setModerationProduct(previewProduct);
+                        setRejectionReason("");
+                        setIsRejectModalOpen(true);
+                      }}
+                    >
+                      <XCircle className="w-3.5 h-3.5 mr-1" /> Reject
+                    </Button>
+                  </>
+                )}
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => setPreviewProduct(null)}>
+                Close Preview
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

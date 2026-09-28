@@ -17,6 +17,10 @@ export interface PlanDetails {
   customBranding: boolean;
   apiAccess: boolean;
   priceMonthly: string;
+  monthlyPriceINR: number;
+  yearlyPriceINR: number;
+  monthlyDisplay: string;
+  yearlyDisplay: string;
 }
 
 export const MEMBERSHIP_PLANS: Record<MembershipPlan, PlanDetails> = {
@@ -36,6 +40,10 @@ export const MEMBERSHIP_PLANS: Record<MembershipPlan, PlanDetails> = {
     customBranding: false,
     apiAccess: false,
     priceMonthly: "Free",
+    monthlyPriceINR: 0,
+    yearlyPriceINR: 0,
+    monthlyDisplay: "Free",
+    yearlyDisplay: "Free",
   },
   PRO: {
     name: "PRO",
@@ -52,7 +60,11 @@ export const MEMBERSHIP_PLANS: Record<MembershipPlan, PlanDetails> = {
     betterSearchRanking: true,
     customBranding: true,
     apiAccess: false,
-    priceMonthly: "$29/mo",
+    priceMonthly: "₹1,999/mo",
+    monthlyPriceINR: 1999,
+    yearlyPriceINR: 19999,
+    monthlyDisplay: "₹1,999/mo",
+    yearlyDisplay: "₹19,999/yr",
   },
   BUSINESS: {
     name: "BUSINESS",
@@ -69,9 +81,85 @@ export const MEMBERSHIP_PLANS: Record<MembershipPlan, PlanDetails> = {
     betterSearchRanking: true,
     customBranding: true,
     apiAccess: true,
-    priceMonthly: "$99/mo",
+    priceMonthly: "₹4,999/mo",
+    monthlyPriceINR: 4999,
+    yearlyPriceINR: 49999,
+    monthlyDisplay: "₹4,999/mo",
+    yearlyDisplay: "₹49,999/yr",
   },
 };
+
+export interface DbFeeRule {
+  id: string;
+  membership_plan: MembershipPlan;
+  display_name: string;
+  description: string;
+  active: boolean;
+  monthly_price: number;
+  yearly_price: number;
+  max_products: number | null;
+  storage_limit_mb: number;
+  admin_users_limit: number | null;
+  seller_coupons_enabled: boolean;
+  bulk_csv_enabled: boolean;
+  ranking_boost_level: string;
+  commission_rate: number;
+  billing_duration: string;
+  grace_period_days: number;
+  min_payout_amount: number;
+  escrow_hold_days: number;
+  gst_rate: number;
+  tcs_rate: number;
+  tds_rate: number;
+  platform_absorbs_coupons: boolean;
+  updated_at?: string;
+  updated_by?: string | null;
+  profiles?: {
+    full_name?: string | null;
+    email?: string | null;
+  } | null;
+}
+
+export interface PlanPricingBreakdown {
+  plan: "PRO" | "BUSINESS";
+  billingCycle: "MONTHLY" | "YEARLY";
+  baseAmount: number;
+  taxRate: number; // 0.18
+  taxAmount: number;
+  totalAmount: number;
+}
+
+export function getPlanPricing(
+  plan: "PRO" | "BUSINESS",
+  billingCycle: "MONTHLY" | "YEARLY",
+  ruleOverride?: DbFeeRule | null
+): PlanPricingBreakdown {
+  const planInfo = MEMBERSHIP_PLANS[plan];
+  
+  let baseAmount: number;
+  let taxRate = 0.18; // 18% GST default
+
+  if (ruleOverride) {
+    baseAmount = billingCycle === "YEARLY" 
+      ? Number(ruleOverride.yearly_price) 
+      : Number(ruleOverride.monthly_price);
+    taxRate = Number(ruleOverride.gst_rate) || 0.18;
+  } else {
+    baseAmount = billingCycle === "YEARLY" ? planInfo.yearlyPriceINR : planInfo.monthlyPriceINR;
+  }
+
+  const taxAmount = Math.round(baseAmount * taxRate * 100) / 100;
+  const totalAmount = Math.round((baseAmount + taxAmount) * 100) / 100;
+
+  return {
+    plan,
+    billingCycle,
+    baseAmount,
+    taxRate,
+    taxAmount,
+    totalAmount,
+  };
+}
 
 export interface UsageStatus {
   currentProducts: number;

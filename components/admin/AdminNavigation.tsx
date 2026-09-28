@@ -19,7 +19,9 @@ import {
   MapPin,
   LifeBuoy,
   Menu,
-  X
+  X,
+  Landmark,
+  ShieldCheck
 } from "lucide-react";
 
 export const ADMIN_LINKS = [
@@ -33,6 +35,8 @@ export const ADMIN_LINKS = [
   { label: "Customers", href: "/admin/customers", icon: Users },
   { label: "Sellers", href: "/admin/sellers", icon: Briefcase },
   { label: "Stores", href: "/admin/stores", icon: Store },
+  { label: "Bank Accounts", href: "/admin/finance/bank-accounts", icon: Landmark },
+  { label: "Membership Plans", href: "/admin/membership-plans", icon: ShieldCheck },
   { label: "Coupons", href: "/admin/coupons", icon: Tags },
   { label: "Notifications", href: "/admin/notifications", icon: Bell },
   { label: "Media Library", href: "/admin/media", icon: ImageIcon },

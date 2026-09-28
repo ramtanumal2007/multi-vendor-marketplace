@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import Link from "next/link";
-import { Store, Package, ShoppingCart, User, LogOut, LayoutDashboard, ClipboardList, Zap, Boxes, BarChart3 } from "lucide-react";
+import { Store, Package, ShoppingCart, User, LogOut, LayoutDashboard, ClipboardList, Zap, Boxes, BarChart3, Landmark } from "lucide-react";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -41,7 +41,12 @@ export default async function SellerDashboardLayout({ children }: { children: Re
     .maybeSingle();
 
   if (sellerProfile?.verification_status === "approved") {
-    // Approved seller authorized
+    // Approved seller authorized - globally enforce membership expiry & grace period
+    try {
+      await supabase.rpc("check_seller_membership_status", { p_seller_id: user.id });
+    } catch {
+      // Non-blocking fallback
+    }
   } else if (sellerProfile?.verification_status === "suspended") {
     // Suspended seller blocked
     redirect("/seller/tracking");
@@ -95,6 +100,10 @@ export default async function SellerDashboardLayout({ children }: { children: Re
               <Link href="/seller/membership" className="flex items-center px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-all">
                 <Zap className="h-4 w-4 mr-3 text-amber-500" />
                 Membership
+              </Link>
+              <Link href="/seller/bank-account" className="flex items-center px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-all">
+                <Landmark className="h-4 w-4 mr-3 text-emerald-600" />
+                Bank Account
               </Link>
               <Link href="/seller/tracking" className="flex items-center px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-all">
                 <ClipboardList className="h-4 w-4 mr-3 text-slate-500" />

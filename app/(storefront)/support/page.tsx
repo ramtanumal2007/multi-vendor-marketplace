@@ -25,6 +25,8 @@ import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/lib/context/AuthContext";
 import { createClient } from "@/lib/supabase";
 import { useToast } from "@/components/ui/Toast";
+import { validateStorageFile } from "@/lib/storage";
+import { AttachmentViewer } from "@/components/support/AttachmentViewer";
 
 // Support Categories
 const SUPPORT_CATEGORIES = [
@@ -124,6 +126,7 @@ export default function SupportCenterPage() {
   const [description, setDescription] = useState<string>("");
   const [phoneNumber, setPhoneNumber] = useState<string>("");
   const [attachmentName, setAttachmentName] = useState<string>("");
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Success State
@@ -240,6 +243,23 @@ export default function SupportCenterPage() {
     const matchingOrder = userOrders.find((o) => o.order_number === resolvedOrderNumber);
 
     try {
+      let uploadedAttachmentPath: string | undefined = undefined;
+
+      if (attachmentFile) {
+        const formData = new FormData();
+        formData.append("file", attachmentFile);
+        const uploadRes = await fetch("/api/support/upload-attachment", {
+          method: "POST",
+          body: formData,
+        });
+        const uploadData = await uploadRes.json();
+
+        if (!uploadRes.ok || !uploadData.success) {
+          throw new Error(uploadData.message || "Failed to upload attachment.");
+        }
+        uploadedAttachmentPath = uploadData.filePath;
+      }
+
       const payload = {
         category: selectedCategory,
         orderNumber: resolvedOrderNumber || undefined,
@@ -247,6 +267,7 @@ export default function SupportCenterPage() {
         subject: subject.trim(),
         description: description.trim(),
         phoneNumber: phoneNumber.trim() || undefined,
+        attachmentUrl: uploadedAttachmentPath,
       };
 
       const res = await fetch("/api/support/tickets", {
@@ -271,6 +292,8 @@ export default function SupportCenterPage() {
       setDescription("");
       setOrderNumber("");
       setCustomOrderInput("");
+      setAttachmentFile(null);
+      setAttachmentName("");
 
       addToast({
         title: "Support Request Submitted",
@@ -656,20 +679,49 @@ export default function SupportCenterPage() {
                     <span>Choose File</span>
                     <input
                       type="file"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
-                        if (file) setAttachmentName(file.name);
+                        if (file) {
+                          const validation = validateStorageFile(
+                            { name: file.name, size: file.size, type: file.type },
+                            "support-attachments"
+                          );
+                          if (!validation.valid) {
+                            addToast({
+                              title: "Invalid Attachment",
+                              description: validation.error || "File violates support attachment policy.",
+                              type: "error",
+                            });
+                            return;
+                          }
+                          setAttachmentFile(file);
+                          setAttachmentName(file.name);
+                        }
                       }}
                     />
                   </label>
                   {attachmentName ? (
-                    <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      {attachmentName}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        {attachmentName}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAttachmentFile(null);
+                          setAttachmentName("");
+                        }}
+                        className="p-1 rounded-full text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        title="Remove attachment"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ) : (
-                    <span className="text-xs text-slate-400">No file selected</span>
+                    <span className="text-xs text-slate-400">No file selected (Max 10MB; JPEG, PNG, WebP, PDF)</span>
                   )}
                 </div>
               </div>
@@ -857,6 +909,13 @@ export default function SupportCenterPage() {
                   {selectedTicket.description}
                 </p>
 
+                {selectedTicket.attachment_url && (
+                  <AttachmentViewer
+                    attachmentUrl={selectedTicket.attachment_url}
+                    bucket="support-attachments"
+                  />
+                )}
+
                 {selectedTicket.order_number && (
                   <p className="text-[11px] font-mono text-slate-400">
                     Associated Order: #{selectedTicket.order_number}
@@ -899,6 +958,12 @@ export default function SupportCenterPage() {
                             <span>{formatDate(msg.created_at)}</span>
                           </div>
                           <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>
+                          {msg.attachment_url && (
+                            <AttachmentViewer
+                              attachmentUrl={msg.attachment_url}
+                              bucket="support-attachments"
+                            />
+                          )}
                         </div>
                       </div>
                     );

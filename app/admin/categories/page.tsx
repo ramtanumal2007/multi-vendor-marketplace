@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Edit, Trash2, Loader2, Save } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Loader2, Save, Upload, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase";
 import { useToast } from "@/components/ui/Toast";
+import { validateStorageFile, generateSafeFileName, getPublicStorageUrl } from "@/lib/storage";
 
 function formatDate(dateString: string) {
   try {
@@ -23,6 +24,7 @@ interface CategoryItem {
   name: string;
   slug: string;
   description?: string | null;
+  image_url?: string | null;
   tax_rate?: number | null;
   created_at: string;
 }
@@ -39,8 +41,10 @@ export default function AdminCategoriesPage() {
     name: "",
     description: "",
     tax_rate: "",
+    image_url: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const supabase = createClient();
   const { addToast } = useToast();
@@ -54,8 +58,9 @@ export default function AdminCategoriesPage() {
 
     if (!error && data) {
       setCategories(
-        data.map((c: { id: string; name: string; slug: string; description?: string | null; tax_rate?: number | null; created_at: string }) => ({
+        data.map((c: { id: string; name: string; slug: string; description?: string | null; image_url?: string | null; tax_rate?: number | null; created_at: string }) => ({
           ...c,
+          image_url: c.image_url || null,
           tax_rate: c.tax_rate !== null && c.tax_rate !== undefined ? Number(c.tax_rate) : null,
         }))
       );
@@ -69,7 +74,7 @@ export default function AdminCategoriesPage() {
 
   const handleOpenAddModal = () => {
     setEditingCategory(null);
-    setFormData({ name: "", description: "", tax_rate: "" });
+    setFormData({ name: "", description: "", tax_rate: "", image_url: "" });
     setIsModalOpen(true);
   };
 
@@ -79,8 +84,48 @@ export default function AdminCategoriesPage() {
       name: cat.name || "",
       description: cat.description || "",
       tax_rate: cat.tax_rate !== null && cat.tax_rate !== undefined ? String(cat.tax_rate) : "",
+      image_url: cat.image_url || "",
     });
     setIsModalOpen(true);
+  };
+
+  const handleUploadCategoryImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+
+    const validation = validateStorageFile(
+      { name: file.name, size: file.size, type: file.type },
+      "category-images"
+    );
+
+    if (!validation.valid) {
+      addToast({
+        title: "Validation error",
+        description: validation.error || "File violates category-images policy.",
+        type: "error",
+      });
+      return;
+    }
+
+    setIsUploadingImage(true);
+    const safeName = generateSafeFileName(file.name, "category");
+
+    const { error: uploadError } = await supabase.storage
+      .from("category-images")
+      .upload(safeName, file, {
+        contentType: file.type,
+        upsert: false,
+      });
+
+    setIsUploadingImage(false);
+
+    if (uploadError) {
+      addToast({ title: "Upload failed", description: uploadError.message, type: "error" });
+    } else {
+      const publicUrl = getPublicStorageUrl("category-images", safeName);
+      setFormData((prev) => ({ ...prev, image_url: publicUrl }));
+      addToast({ title: "Image uploaded to category-images", type: "success" });
+    }
   };
 
   const handleSaveCategory = async (e: React.FormEvent) => {
@@ -98,6 +143,7 @@ export default function AdminCategoriesPage() {
         name: formData.name.trim(),
         slug: editingCategory ? editingCategory.slug : `${slug}-${Date.now().toString().slice(-4)}`,
         description: formData.description.trim() || null,
+        image_url: formData.image_url.trim() || null,
         tax_rate: formData.tax_rate.trim() !== "" ? parseFloat(formData.tax_rate) : null,
       };
 
@@ -175,6 +221,7 @@ export default function AdminCategoriesPage() {
           <table className="w-full text-sm text-left">
             <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[11px] tracking-wider border-b border-slate-200">
               <tr>
+                <th className="px-6 py-3.5">Image</th>
                 <th className="px-6 py-3.5">Category Name</th>
                 <th className="px-6 py-3.5">Slug</th>
                 <th className="px-6 py-3.5">Category Tax Rate (%)</th>
@@ -186,7 +233,7 @@ export default function AdminCategoriesPage() {
             <tbody className="divide-y divide-slate-200 font-medium">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
                     <div className="flex justify-center mb-3">
                       <Loader2 className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
                     </div>
@@ -195,13 +242,25 @@ export default function AdminCategoriesPage() {
                 </tr>
               ) : filteredCategories.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
                     No categories found matching &quot;{searchTerm}&quot;.
                   </td>
                 </tr>
               ) : (
                 filteredCategories.map((category) => (
                   <tr key={category.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-3.5">
+                      {category.image_url ? (
+                        <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={category.image_url} alt={category.name} className="w-full h-full object-cover" />
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg border border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-slate-300">
+                          <ImageIcon className="w-4 h-4" />
+                        </div>
+                      )}
+                    </td>
                     <td className="px-6 py-4 font-bold text-slate-900">{category.name}</td>
                     <td className="px-6 py-4 text-slate-500">{category.slug}</td>
                     <td className="px-6 py-4">
@@ -262,6 +321,54 @@ export default function AdminCategoriesPage() {
                   placeholder="e.g. Groceries, Electronics..."
                   className="w-full px-3.5 py-2 border border-slate-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-accent/20 focus:border-accent"
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700 uppercase">
+                    Category Image (Optional)
+                  </label>
+                  <label className="cursor-pointer text-xs font-semibold text-accent hover:underline flex items-center gap-1">
+                    {isUploadingImage ? (
+                      <span className="flex items-center gap-1 text-slate-400">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Uploading...
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1">
+                        <Upload className="w-3 h-3" /> Upload to category-images
+                      </span>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                      disabled={isUploadingImage}
+                      onChange={handleUploadCategoryImage}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <input
+                  type="url"
+                  value={formData.image_url}
+                  onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
+                  placeholder="https://... or upload"
+                  className="w-full px-3.5 py-2 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-accent/20 focus:border-accent"
+                />
+                {formData.image_url && (
+                  <div className="mt-2 flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-lg border border-slate-200 overflow-hidden bg-slate-50">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={formData.image_url} alt="Preview" className="w-full h-full object-cover" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, image_url: "" })}
+                      className="text-xs text-red-500 hover:underline"
+                    >
+                      Clear Image
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div>

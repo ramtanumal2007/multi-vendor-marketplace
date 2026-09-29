@@ -1,10 +1,16 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Upload, Trash2, Copy, Image as ImageIcon } from "lucide-react";
+import { Upload, Trash2, Copy, Image as ImageIcon, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase";
+import {
+  validateStorageFile,
+  generateSafeFileName,
+  STORAGE_BUCKET_CONFIG,
+  StorageBucket,
+} from "@/lib/storage";
 
 interface MediaFile {
   id: string;
@@ -19,7 +25,7 @@ export default function AdminMediaPage() {
   const [files, setFiles] = useState<MediaFile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
-  const [bucket, setBucket] = useState("product-images");
+  const [bucket, setBucket] = useState<StorageBucket>("brand-assets");
   const { addToast } = useToast();
   const supabase = createClient();
 
@@ -48,12 +54,30 @@ export default function AdminMediaPage() {
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     
-    setIsUploading(true);
     const file = e.target.files[0];
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
 
-    const { error } = await supabase.storage.from(bucket).upload(fileName, file);
+    // Client/Server side validation according to bucket policy
+    const validation = validateStorageFile(
+      { name: file.name, size: file.size, type: file.type },
+      bucket
+    );
+
+    if (!validation.valid) {
+      addToast({
+        title: "Validation error",
+        description: validation.error || "File violates bucket policy constraints.",
+        type: "error",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    const fileName = generateSafeFileName(file.name, bucket);
+
+    const { error } = await supabase.storage.from(bucket).upload(fileName, file, {
+      contentType: file.type,
+      upsert: false,
+    });
 
     setIsUploading(false);
     
@@ -84,38 +108,56 @@ export default function AdminMediaPage() {
     addToast({ title: "Link copied to clipboard", type: "success" });
   };
 
+  const bucketConfig = STORAGE_BUCKET_CONFIG[bucket];
+
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto h-full pb-12">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Media Library</h1>
-          <p className="text-sm text-slate-500 mt-1">Manage product images and brand assets.</p>
+          <h1 className="text-2xl font-bold text-slate-900">Media Library</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Manage marketplace brand assets, promotional banners, and category media.
+          </p>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 w-full sm:w-auto">
           <select 
             value={bucket}
-            onChange={(e) => setBucket(e.target.value)}
-            className="bg-white border border-slate-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+            onChange={(e) => setBucket(e.target.value as StorageBucket)}
+            className="bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
           >
-            <option value="product-images">Product Images</option>
-            <option value="brand-assets">Brand Assets</option>
+            <option value="brand-assets">Brand Assets (brand-assets)</option>
+            <option value="promotional-banners">Promotional Banners (promotional-banners)</option>
+            <option value="category-images">Category Images (category-images)</option>
+            <option value="product-images">Product Images (product-images)</option>
           </select>
           
           <div className="relative">
             <input 
               type="file" 
-              accept="image/*" 
+              accept={bucketConfig ? bucketConfig.allowedMimeTypes.join(",") : "image/*"} 
               onChange={handleUpload} 
               disabled={isUploading}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
             />
-            <Button variant="primary" className="flex items-center gap-2 pointer-events-none" disabled={isUploading}>
+            <Button variant="primary" className="flex items-center gap-2 pointer-events-none rounded-xl" disabled={isUploading}>
               <Upload className="w-4 h-4" /> {isUploading ? "Uploading..." : "Upload File"}
             </Button>
           </div>
         </div>
       </div>
+
+      {bucketConfig && (
+        <div className="flex items-center justify-between text-xs px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-600">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span><strong>Active Bucket:</strong> {bucketConfig.name} ({bucketConfig.isPublic ? "Public" : "Private"})</span>
+            <span className="text-slate-300">|</span>
+            <span>Max Size: {Math.round(bucketConfig.maxSizeBytes / (1024 * 1024))} MB</span>
+          </div>
+          <span className="text-slate-400 hidden md:inline">{bucketConfig.description}</span>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 min-h-[500px]">
         {isLoading ? (

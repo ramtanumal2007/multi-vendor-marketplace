@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { AttachmentViewer } from "@/components/support/AttachmentViewer";
 
 interface SupportTicketMessage {
   id: string;
@@ -46,6 +47,7 @@ interface SupportTicket {
   category: string;
   subject: string;
   description: string;
+  attachment_url?: string | null;
   status: "OPEN" | "UNDER_REVIEW" | "ACTION_TAKEN" | "RESOLVED" | "CLOSED";
   priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
   admin_notes?: string | null;
@@ -541,6 +543,12 @@ export default function AdminSupportPage() {
                     <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
                       {selectedTicket.description}
                     </p>
+                    {selectedTicket.attachment_url && (
+                      <AttachmentViewer
+                        attachmentUrl={selectedTicket.attachment_url}
+                        bucket="support-attachments"
+                      />
+                    )}
                   </div>
 
                   {/* Messages from support_ticket_messages */}
@@ -569,6 +577,12 @@ export default function AdminSupportPage() {
                           </span>
                         </div>
                         <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>
+                        {msg.attachment_url && (
+                          <AttachmentViewer
+                            attachmentUrl={msg.attachment_url}
+                            bucket="support-attachments"
+                          />
+                        )}
                       </div>
                     );
                   })}

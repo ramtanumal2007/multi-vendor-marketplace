@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import { Store as StoreIcon, Palette, FileText, Share2, Check } from "lucide-react";
+import { Store as StoreIcon, Palette, FileText, Share2, Check, Upload, Loader2, X } from "lucide-react";
+import { validateStorageFile, generateSafeFileName, getPublicStorageUrl } from "@/lib/storage";
 
 export interface StoreRecord {
   id?: string;
@@ -42,9 +43,65 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [taglineText, setTaglineText] = useState<string>(existingStore?.tagline || "");
+  const [logoUrl, setLogoUrl] = useState<string>(existingStore?.logo_url ?? "");
+  const [bannerUrl, setBannerUrl] = useState<string>(existingStore?.banner_url ?? "");
+  const [uploadingLogo, setUploadingLogo] = useState<boolean>(false);
+  const [uploadingBanner, setUploadingBanner] = useState<boolean>(false);
 
   const router = useRouter();
   const supabase = createClient();
+
+  const handleUploadBrandingAsset = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    type: "logo" | "banner"
+  ) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+
+    const validation = validateStorageFile(
+      { name: file.name, size: file.size, type: file.type },
+      "seller-store-branding"
+    );
+
+    if (!validation.valid) {
+      setError(validation.error || "Invalid file for store branding.");
+      return;
+    }
+
+    if (type === "logo") setUploadingLogo(true);
+    else setUploadingBanner(true);
+    setError(null);
+
+    try {
+      const safeName = generateSafeFileName(file.name, type);
+      const filePath = `seller/${sellerId}/branding/${safeName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("seller-store-branding")
+        .upload(filePath, file, {
+          contentType: file.type,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw new Error(uploadError.message || `Failed to upload ${type}`);
+      }
+
+      const publicUrl = getPublicStorageUrl("seller-store-branding", filePath);
+      if (type === "logo") {
+        setLogoUrl(publicUrl);
+      } else {
+        setBannerUrl(publicUrl);
+      }
+      setSuccess(`Store ${type} uploaded to seller-store-branding successfully!`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to upload branding image.";
+      setError(msg);
+    } finally {
+      if (type === "logo") setUploadingLogo(false);
+      else setUploadingBanner(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -66,8 +123,8 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
       slug: formData.get("slug") as string,
       tagline: taglineVal,
       primary_color: (formData.get("primary_color") as string) || "#2563EB",
-      logo_url: formData.get("logo_url") as string,
-      banner_url: formData.get("banner_url") as string,
+      logo_url: logoUrl || (formData.get("logo_url") as string) || null,
+      banner_url: bannerUrl || (formData.get("banner_url") as string) || null,
       description: formData.get("description") as string,
       about_store: formData.get("about_store") as string,
       shipping_policy: formData.get("shipping_policy") as string,
@@ -287,27 +344,99 @@ export default function StoreForm({ existingStore, sellerId }: { existingStore: 
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
-            <label htmlFor="logo_url" className="block text-xs font-bold text-slate-700 mb-1">Logo Image URL</label>
+            <div className="flex items-center justify-between mb-1">
+              <label htmlFor="logo_url" className="block text-xs font-bold text-slate-700">Logo Image</label>
+              <label className="cursor-pointer text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1">
+                {uploadingLogo ? (
+                  <span className="flex items-center gap-1 text-slate-400">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Uploading...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <Upload className="w-3 h-3" /> Upload Logo
+                  </span>
+                )}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  disabled={uploadingLogo}
+                  onChange={(e) => handleUploadBrandingAsset(e, "logo")}
+                  className="hidden"
+                />
+              </label>
+            </div>
             <input
               type="url"
               name="logo_url"
               id="logo_url"
-              defaultValue={existingStore?.logo_url ?? ""}
-              placeholder="https://..."
+              value={logoUrl}
+              onChange={(e) => setLogoUrl(e.target.value)}
+              placeholder="https://... or upload"
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
+            {logoUrl && (
+              <div className="mt-2 flex items-center gap-3">
+                <div className="w-12 h-12 rounded-lg border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={logoUrl} alt="Store Logo" className="w-full h-full object-contain" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLogoUrl("")}
+                  className="text-xs text-red-500 hover:underline flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear
+                </button>
+              </div>
+            )}
           </div>
 
           <div>
-            <label htmlFor="banner_url" className="block text-xs font-bold text-slate-700 mb-1">Store Banner URL</label>
+            <div className="flex items-center justify-between mb-1">
+              <label htmlFor="banner_url" className="block text-xs font-bold text-slate-700">Store Banner</label>
+              <label className="cursor-pointer text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1">
+                {uploadingBanner ? (
+                  <span className="flex items-center gap-1 text-slate-400">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Uploading...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <Upload className="w-3 h-3" /> Upload Banner
+                  </span>
+                )}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  disabled={uploadingBanner}
+                  onChange={(e) => handleUploadBrandingAsset(e, "banner")}
+                  className="hidden"
+                />
+              </label>
+            </div>
             <input
               type="url"
               name="banner_url"
               id="banner_url"
-              defaultValue={existingStore?.banner_url ?? ""}
-              placeholder="https://..."
+              value={bannerUrl}
+              onChange={(e) => setBannerUrl(e.target.value)}
+              placeholder="https://... or upload"
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
+            {bannerUrl && (
+              <div className="mt-2 flex items-center gap-3">
+                <div className="w-24 h-12 rounded-lg border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={bannerUrl} alt="Store Banner" className="w-full h-full object-cover" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBannerUrl("")}
+                  className="text-xs text-red-500 hover:underline flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear
+                </button>
+              </div>
+            )}
           </div>
 
           <div>

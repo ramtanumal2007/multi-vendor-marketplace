@@ -92,6 +92,7 @@ export async function POST(req: NextRequest) {
       subject,
       description,
       phoneNumber,
+      attachmentUrl,
     } = body;
 
     if (!category || !subject?.trim() || !description?.trim()) {
@@ -101,15 +102,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Call atomic PostgreSQL RPC (creates ticket + initial message in one single transaction)
-    const { data: createdTicket, error: rpcError } = await supabase.rpc("create_support_ticket", {
+    // Call atomic PostgreSQL RPC with attachment support
+    let createdTicket: Record<string, unknown> | null = null;
+    let rpcError: { message: string } | null = null;
+
+    const rpcResWithAttachment = await supabase.rpc("create_support_ticket", {
       p_category: category,
       p_subject: subject.trim(),
       p_description: description.trim(),
       p_order_id: orderId || null,
       p_order_number: orderNumber || null,
       p_phone_number: phoneNumber?.trim() || null,
+      p_attachment_url: attachmentUrl || null,
     });
+
+    if (rpcResWithAttachment.error && rpcResWithAttachment.error.message?.includes("function") && rpcResWithAttachment.error.message?.includes("does not exist")) {
+      // Backward compatibility if new RPC signature is pending migration
+      const rpcResLegacy = await supabase.rpc("create_support_ticket", {
+        p_category: category,
+        p_subject: subject.trim(),
+        p_description: description.trim(),
+        p_order_id: orderId || null,
+        p_order_number: orderNumber || null,
+        p_phone_number: phoneNumber?.trim() || null,
+      });
+
+      if (!rpcResLegacy.error && rpcResLegacy.data && attachmentUrl) {
+        // Persist attachment_url to the newly created ticket directly
+        await supabase
+          .from("support_tickets")
+          .update({ attachment_url: attachmentUrl })
+          .eq("id", rpcResLegacy.data.id);
+      }
+      createdTicket = rpcResLegacy.data;
+      rpcError = rpcResLegacy.error;
+    } else {
+      createdTicket = rpcResWithAttachment.data;
+      rpcError = rpcResWithAttachment.error;
+    }
 
     if (rpcError) {
       return NextResponse.json(
@@ -121,7 +151,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       ticket: createdTicket,
-      ticketNumber: createdTicket?.ticket_number,
+      ticketNumber: (createdTicket as { ticket_number?: string })?.ticket_number,
     });
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : "Internal server error";

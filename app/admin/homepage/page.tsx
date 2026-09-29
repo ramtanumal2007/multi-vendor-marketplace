@@ -12,10 +12,13 @@ import {
   Zap,
   Sliders,
   Flame,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase";
 import { useToast } from "@/components/ui/Toast";
+import { validateStorageFile, generateSafeFileName, getPublicStorageUrl } from "@/lib/storage";
 
 interface HeroSlide {
   id: string;
@@ -88,6 +91,46 @@ export default function AdminHomepageManager() {
     is_active: true
   });
   const [showAddSlide, setShowAddSlide] = useState(false);
+  const [isUploadingBanner, setIsUploadingBanner] = useState(false);
+
+  const handleUploadHeroBanner = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+
+    const validation = validateStorageFile(
+      { name: file.name, size: file.size, type: file.type },
+      "promotional-banners"
+    );
+
+    if (!validation.valid) {
+      addToast({
+        title: "Validation error",
+        description: validation.error || "File violates promotional-banners policy.",
+        type: "error",
+      });
+      return;
+    }
+
+    setIsUploadingBanner(true);
+    const safeName = generateSafeFileName(file.name, "hero");
+
+    const { error: uploadError } = await supabase.storage
+      .from("promotional-banners")
+      .upload(safeName, file, {
+        contentType: file.type,
+        upsert: false,
+      });
+
+    setIsUploadingBanner(false);
+
+    if (uploadError) {
+      addToast({ title: "Upload failed", description: uploadError.message, type: "error" });
+    } else {
+      const publicUrl = getPublicStorageUrl("promotional-banners", safeName);
+      setNewSlide((prev) => ({ ...prev, image_url: publicUrl }));
+      addToast({ title: "Banner uploaded to promotional-banners", type: "success" });
+    }
+  };
 
   // Campaign & Rules Config
   const [campaignConfig, setCampaignConfig] = useState<HomepageConfig>({
@@ -340,15 +383,41 @@ export default function AdminHomepageManager() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Image URL</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">Image URL or Upload</label>
+                    <label className="cursor-pointer text-xs font-semibold text-accent hover:underline flex items-center gap-1">
+                      {isUploadingBanner ? (
+                        <span className="flex items-center gap-1 text-slate-400">
+                          <Loader2 className="w-3 h-3 animate-spin" /> Uploading...
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <Upload className="w-3 h-3" /> Upload to promotional-banners
+                        </span>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        disabled={isUploadingBanner}
+                        onChange={handleUploadHeroBanner}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                   <input
                     type="url"
                     required
-                    placeholder="https://images.unsplash.com/..."
+                    placeholder="https://... or uploaded image URL"
                     value={newSlide.image_url}
                     onChange={(e) => setNewSlide({ ...newSlide, image_url: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-accent"
                   />
+                  {newSlide.image_url && (
+                    <div className="mt-2 relative w-24 h-14 rounded-lg overflow-hidden border border-slate-200">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={newSlide.image_url} alt="Banner Preview" className="w-full h-full object-cover" />
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">CTA Text & Link</label>

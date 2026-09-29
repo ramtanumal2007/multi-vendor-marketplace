@@ -97,6 +97,14 @@ export interface DbFeeRule {
   active: boolean;
   monthly_price: number;
   yearly_price: number;
+  original_monthly_price?: number | null;
+  offer_monthly_price?: number | null;
+  original_yearly_price?: number | null;
+  offer_yearly_price?: number | null;
+  offer_enabled?: boolean | null;
+  offer_label?: string | null;
+  offer_badge?: string | null;
+  offer_valid_until?: string | null;
   max_products: number | null;
   storage_limit_mb: number;
   admin_users_limit: number | null;
@@ -124,6 +132,12 @@ export interface PlanPricingBreakdown {
   plan: "PRO" | "BUSINESS";
   billingCycle: "MONTHLY" | "YEARLY";
   baseAmount: number;
+  originalBaseAmount?: number | null;
+  offerActive: boolean;
+  offerBadge?: string | null;
+  offerLabel?: string | null;
+  savingsAmount?: number;
+  savingsPercentage?: number;
   taxRate: number; // 0.18
   taxAmount: number;
   totalAmount: number;
@@ -137,15 +151,53 @@ export function getPlanPricing(
   const planInfo = MEMBERSHIP_PLANS[plan];
   
   let baseAmount: number;
+  let originalBaseAmount: number | null = null;
+  let offerActive = false;
+  let offerBadge: string | null = null;
+  let offerLabel: string | null = null;
   let taxRate = 0.18; // 18% GST default
 
   if (ruleOverride) {
-    baseAmount = billingCycle === "YEARLY" 
-      ? Number(ruleOverride.yearly_price) 
-      : Number(ruleOverride.monthly_price);
     taxRate = Number(ruleOverride.gst_rate) || 0.18;
+    const isOfferOn = Boolean(ruleOverride.offer_enabled);
+
+    if (billingCycle === "YEARLY") {
+      const regYearly = Number(ruleOverride.yearly_price);
+      if (isOfferOn && ruleOverride.offer_yearly_price != null && Number(ruleOverride.offer_yearly_price) > 0) {
+        baseAmount = Number(ruleOverride.offer_yearly_price);
+        originalBaseAmount = ruleOverride.original_yearly_price != null && Number(ruleOverride.original_yearly_price) > 0
+          ? Number(ruleOverride.original_yearly_price)
+          : regYearly;
+        offerActive = true;
+      } else {
+        baseAmount = regYearly;
+      }
+    } else {
+      const regMonthly = Number(ruleOverride.monthly_price);
+      if (isOfferOn && ruleOverride.offer_monthly_price != null && Number(ruleOverride.offer_monthly_price) > 0) {
+        baseAmount = Number(ruleOverride.offer_monthly_price);
+        originalBaseAmount = ruleOverride.original_monthly_price != null && Number(ruleOverride.original_monthly_price) > 0
+          ? Number(ruleOverride.original_monthly_price)
+          : regMonthly;
+        offerActive = true;
+      } else {
+        baseAmount = regMonthly;
+      }
+    }
+
+    if (offerActive) {
+      offerBadge = ruleOverride.offer_badge || "LIMITED OFFER";
+      offerLabel = ruleOverride.offer_label || "Special Offer";
+    }
   } else {
     baseAmount = billingCycle === "YEARLY" ? planInfo.yearlyPriceINR : planInfo.monthlyPriceINR;
+  }
+
+  let savingsAmount: number | undefined;
+  let savingsPercentage: number | undefined;
+  if (offerActive && originalBaseAmount && originalBaseAmount > baseAmount) {
+    savingsAmount = Math.round((originalBaseAmount - baseAmount) * 100) / 100;
+    savingsPercentage = Math.round(((originalBaseAmount - baseAmount) / originalBaseAmount) * 100);
   }
 
   const taxAmount = Math.round(baseAmount * taxRate * 100) / 100;
@@ -155,6 +207,12 @@ export function getPlanPricing(
     plan,
     billingCycle,
     baseAmount,
+    originalBaseAmount,
+    offerActive,
+    offerBadge,
+    offerLabel,
+    savingsAmount,
+    savingsPercentage,
     taxRate,
     taxAmount,
     totalAmount,

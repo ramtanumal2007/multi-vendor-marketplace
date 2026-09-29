@@ -74,6 +74,8 @@ export async function GET() {
         business_name: string | null;
         contact_name: string | null;
         business_email: string | null;
+        upi_id?: string | null;
+        upi_qr_url?: string | null;
       } | null;
     }
 
@@ -83,6 +85,8 @@ export async function GET() {
       seller_business_name: string;
       seller_contact_name: string;
       seller_email: string;
+      seller_upi_id?: string | null;
+      seller_upi_qr_url?: string | null;
       store_id: string | null;
       store_name: string;
       store_slug: string;
@@ -136,7 +140,9 @@ export async function GET() {
             id,
             business_name,
             contact_name,
-            business_email
+            business_email,
+            upi_id,
+            upi_qr_url
           )
         `)
         .order("created_at", { ascending: false });
@@ -165,6 +171,8 @@ export async function GET() {
           seller_business_name: acc.seller_profiles?.business_name || "Unknown Seller",
           seller_contact_name: acc.seller_profiles?.contact_name || "",
           seller_email: acc.seller_profiles?.business_email || "",
+          seller_upi_id: acc.seller_profiles?.upi_id || null,
+          seller_upi_qr_url: acc.seller_profiles?.upi_qr_url || null,
           store_id: store?.id || null,
           store_name: store?.name || acc.seller_profiles?.business_name || "Main Store",
           store_slug: store?.slug || "",
@@ -186,6 +194,38 @@ export async function GET() {
         };
       });
     }
+
+    // Generate fresh 300-second short-lived signed URLs for any private QR images
+    const supabaseAdminForSigned = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    accountsList = await Promise.all(
+      accountsList.map(async (acc) => {
+        let qr = acc.seller_upi_qr_url;
+        if (qr) {
+          try {
+            if (!qr.startsWith("http")) {
+              const { data: signedData } = await supabaseAdminForSigned.storage
+                .from("seller-payment-docs")
+                .createSignedUrl(qr, 300);
+              if (signedData?.signedUrl) qr = signedData.signedUrl;
+            } else if (qr.includes("seller-payment-docs")) {
+              const path = qr.split("seller-payment-docs/")[1]?.split("?")[0];
+              if (path) {
+                const { data: signedData } = await supabaseAdminForSigned.storage
+                  .from("seller-payment-docs")
+                  .createSignedUrl(path, 300);
+                if (signedData?.signedUrl) qr = signedData.signedUrl;
+              }
+            }
+          } catch {
+            // Keep original on fallback
+          }
+        }
+        return { ...acc, seller_upi_qr_url: qr };
+      })
+    );
 
     // Compute metrics
     const metrics = {

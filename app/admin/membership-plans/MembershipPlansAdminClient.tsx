@@ -59,6 +59,14 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
     gstRatePct: 18, // 18.00% -> 0.18
     tcsRatePct: 0.5, // 0.50% -> 0.005
     tdsRatePct: 0.1, // 0.10% -> 0.001
+    originalMonthlyPrice: "" as string | number,
+    offerMonthlyPrice: "" as string | number,
+    originalYearlyPrice: "" as string | number,
+    offerYearlyPrice: "" as string | number,
+    offerEnabled: false,
+    offerLabel: "Special Offer",
+    offerBadge: "Limited Time",
+    offerValidUntil: "",
   });
 
   const handleOpenEdit = (plan: DbFeeRule) => {
@@ -83,6 +91,14 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
       gstRatePct: Number((Number(plan.gst_rate || 0.18) * 100).toFixed(2)),
       tcsRatePct: Number((Number(plan.tcs_rate || 0.005) * 100).toFixed(2)),
       tdsRatePct: Number((Number(plan.tds_rate || 0.001) * 100).toFixed(2)),
+      originalMonthlyPrice: plan.original_monthly_price ?? "",
+      offerMonthlyPrice: plan.offer_monthly_price ?? "",
+      originalYearlyPrice: plan.original_yearly_price ?? "",
+      offerYearlyPrice: plan.offer_yearly_price ?? "",
+      offerEnabled: Boolean(plan.offer_enabled),
+      offerLabel: plan.offer_label || "Special Offer",
+      offerBadge: plan.offer_badge || "Limited Time",
+      offerValidUntil: plan.offer_valid_until ? plan.offer_valid_until.split("T")[0] : "",
     });
     setShowConfirmDiff(false);
     setErrorMsg(null);
@@ -196,6 +212,14 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
         gstRate: Number((formState.gstRatePct / 100).toFixed(4)),
         tcsRate: Number((formState.tcsRatePct / 100).toFixed(4)),
         tdsRate: Number((formState.tdsRatePct / 100).toFixed(4)),
+        originalMonthlyPrice: formState.originalMonthlyPrice === "" ? null : Number(formState.originalMonthlyPrice),
+        offerMonthlyPrice: formState.offerMonthlyPrice === "" ? null : Number(formState.offerMonthlyPrice),
+        originalYearlyPrice: formState.originalYearlyPrice === "" ? null : Number(formState.originalYearlyPrice),
+        offerYearlyPrice: formState.offerYearlyPrice === "" ? null : Number(formState.offerYearlyPrice),
+        offerEnabled: formState.offerEnabled,
+        offerLabel: formState.offerLabel.trim(),
+        offerBadge: formState.offerBadge.trim(),
+        offerValidUntil: formState.offerValidUntil ? new Date(formState.offerValidUntil).toISOString() : null,
       };
 
       const res = await fetch(`/api/admin/membership-plans/${selectedPlan.membership_plan}`, {
@@ -342,14 +366,27 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
                       </div>
                     ) : (
                       <div className="space-y-1">
+                        {plan.offer_enabled && (
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <span className="text-xs font-bold text-slate-400 line-through">
+                              ₹{Number(plan.original_monthly_price || plan.monthly_price).toLocaleString("en-IN")}
+                            </span>
+                            <span className="bg-rose-100 text-rose-800 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                              {plan.offer_badge || "SPECIAL OFFER"}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex items-baseline gap-1.5">
                           <span className="text-3xl font-black text-slate-900">
-                            ₹{Number(plan.monthly_price).toLocaleString("en-IN")}
+                            ₹{Number(plan.offer_enabled && plan.offer_monthly_price != null ? plan.offer_monthly_price : plan.monthly_price).toLocaleString("en-IN")}
                           </span>
                           <span className="text-xs font-semibold text-slate-400">/ month</span>
                         </div>
                         <div className="text-[11px] text-slate-500 font-medium">
-                          Annual: <strong>₹{Number(plan.yearly_price).toLocaleString("en-IN")}/yr</strong>
+                          Annual:{" "}
+                          <strong>
+                            ₹{Number(plan.offer_enabled && plan.offer_yearly_price != null ? plan.offer_yearly_price : plan.yearly_price).toLocaleString("en-IN")}/yr
+                          </strong>
                         </div>
                       </div>
                     )}
@@ -602,16 +639,27 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
                 </div>
               </div>
 
-              {/* Section 2: Pricing */}
+              {/* Section 2: Pricing & Promotional Offers */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-4">
-                <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                  2. Pricing (INR)
-                </h4>
+                <div className="flex justify-between items-center">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    2. Pricing &amp; Promotional Offers (INR)
+                  </h4>
+                  <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1 rounded-xl border border-slate-200 shadow-2xs">
+                    <input
+                      type="checkbox"
+                      checked={formState.offerEnabled}
+                      onChange={(e) => setFormState({ ...formState, offerEnabled: e.target.checked })}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-xs font-extrabold text-slate-800">Enable Special Offer</span>
+                  </label>
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Monthly Price (₹)
+                      Standard Monthly Price (₹) *
                     </label>
                     <input
                       type="number"
@@ -625,7 +673,7 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Yearly Price (₹)
+                      Standard Yearly Price (₹) *
                     </label>
                     <input
                       type="number"
@@ -637,6 +685,119 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
                     />
                   </div>
                 </div>
+
+                {/* Offer Fields when Offer is Enabled */}
+                {formState.offerEnabled && (
+                  <div className="p-4 bg-gradient-to-r from-rose-50/70 to-amber-50/70 rounded-xl border border-rose-200/80 space-y-3 animate-in fade-in">
+                    <span className="text-[10px] font-black uppercase text-rose-800 tracking-wider block">
+                      Promotional Discount Configuration
+                    </span>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Original Monthly Price (Struck-through)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          placeholder="e.g. 1999"
+                          value={formState.originalMonthlyPrice}
+                          onChange={(e) => setFormState({ ...formState, originalMonthlyPrice: e.target.value })}
+                          className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1 font-bold text-rose-700">
+                          Offer Monthly Price (Effective Charged) *
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          placeholder="e.g. 999"
+                          value={formState.offerMonthlyPrice}
+                          onChange={(e) => setFormState({ ...formState, offerMonthlyPrice: e.target.value })}
+                          className="w-full text-xs px-3 py-2 border border-rose-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white font-mono font-bold text-rose-700"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Original Yearly Price (Struck-through)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          placeholder="e.g. 19999"
+                          value={formState.originalYearlyPrice}
+                          onChange={(e) => setFormState({ ...formState, originalYearlyPrice: e.target.value })}
+                          className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1 font-bold text-rose-700">
+                          Offer Yearly Price (Effective Charged) *
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          placeholder="e.g. 9999"
+                          value={formState.offerYearlyPrice}
+                          onChange={(e) => setFormState({ ...formState, offerYearlyPrice: e.target.value })}
+                          className="w-full text-xs px-3 py-2 border border-rose-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white font-mono font-bold text-rose-700"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Offer Badge Tag
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. LIMITED OFFER"
+                          value={formState.offerBadge}
+                          onChange={(e) => setFormState({ ...formState, offerBadge: e.target.value })}
+                          className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white font-semibold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Offer Sub-label
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Special Launch Offer"
+                          value={formState.offerLabel}
+                          onChange={(e) => setFormState({ ...formState, offerLabel: e.target.value })}
+                          className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Offer Valid Until
+                        </label>
+                        <input
+                          type="date"
+                          value={formState.offerValidUntil}
+                          onChange={(e) => setFormState({ ...formState, offerValidUntil: e.target.value })}
+                          className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Section 3: Limits */}

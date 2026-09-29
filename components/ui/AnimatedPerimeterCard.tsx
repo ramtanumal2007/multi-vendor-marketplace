@@ -158,7 +158,7 @@ export function AnimatedPerimeterCard({
       )}
 
       {/* Card Content container with pristine readability and solid bg */}
-      <div className="relative z-10 w-full h-full rounded-2xl bg-white dark:bg-slate-900 overflow-hidden flex flex-col justify-between">
+      <div className="relative z-10 w-full h-full rounded-2xl bg-white dark:bg-slate-900 flex flex-col justify-between">
         {children}
       </div>
 

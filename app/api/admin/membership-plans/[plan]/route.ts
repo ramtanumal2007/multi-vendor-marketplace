@@ -5,6 +5,30 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+export async function GET(
+  req: Request,
+  { params }: { params: { plan: string } }
+) {
+  try {
+    const planUpper = params.plan?.toUpperCase().trim();
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const { data: plan, error } = await supabaseAdmin
+      .from("marketplace_fee_rules")
+      .select("*")
+      .eq("membership_plan", planUpper)
+      .maybeSingle();
+
+    if (error || !plan) {
+      return NextResponse.json({ success: false, message: "Plan not found" }, { status: 404 });
+    }
+  } catch {
+    return NextResponse.json({ success: false, message: "Internal error" }, { status: 500 });
+  }
+}
+
 export async function PATCH(
   req: Request,
   { params }: { params: { plan: string } }
@@ -106,6 +130,14 @@ export async function PATCH(
       p_gst_rate: Number(body.gstRate) || 0.18,
       p_tcs_rate: Number(body.tcsRate) || 0.005,
       p_tds_rate: Number(body.tdsRate) || 0.001,
+      p_original_monthly_price: body.originalMonthlyPrice != null ? Number(body.originalMonthlyPrice) : null,
+      p_offer_monthly_price: body.offerMonthlyPrice != null ? Number(body.offerMonthlyPrice) : null,
+      p_original_yearly_price: body.originalYearlyPrice != null ? Number(body.originalYearlyPrice) : null,
+      p_offer_yearly_price: body.offerYearlyPrice != null ? Number(body.offerYearlyPrice) : null,
+      p_offer_enabled: Boolean(body.offerEnabled),
+      p_offer_label: body.offerLabel?.trim() || "Special Offer",
+      p_offer_badge: body.offerBadge?.trim() || "Limited Time",
+      p_offer_valid_until: body.offerValidUntil || null,
     });
 
     if (!rpcErr && rpcResult?.success) {
@@ -144,6 +176,14 @@ export async function PATCH(
       gst_rate: Number(body.gstRate) || 0.18,
       tcs_rate: Number(body.tcsRate) || 0.005,
       tds_rate: Number(body.tdsRate) || 0.001,
+      original_monthly_price: body.originalMonthlyPrice != null ? Number(body.originalMonthlyPrice) : null,
+      offer_monthly_price: body.offerMonthlyPrice != null ? Number(body.offerMonthlyPrice) : null,
+      original_yearly_price: body.originalYearlyPrice != null ? Number(body.originalYearlyPrice) : null,
+      offer_yearly_price: body.offerYearlyPrice != null ? Number(body.offerYearlyPrice) : null,
+      offer_enabled: Boolean(body.offerEnabled),
+      offer_label: body.offerLabel?.trim() || "Special Offer",
+      offer_badge: body.offerBadge?.trim() || "Limited Time",
+      offer_valid_until: body.offerValidUntil || null,
       updated_by: user.id,
       updated_at: new Date().toISOString(),
     };

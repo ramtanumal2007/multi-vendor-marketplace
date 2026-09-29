@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { Check, ArrowRight, ShieldCheck, AlertTriangle, Sparkles, Loader2 } from "lucide-react";
+import { Check, ArrowRight, ShieldCheck, AlertTriangle, Sparkles, Crown, Loader2, Tag } from "lucide-react";
 import { MEMBERSHIP_PLANS, MembershipPlan, MembershipStatus, getPlanPricing, DbFeeRule } from "@/lib/membership";
+import { AnimatedPerimeterCard, PerimeterTheme } from "@/components/ui/AnimatedPerimeterCard";
 import { useRouter } from "next/navigation";
 
 interface MembershipClientViewProps {
@@ -69,7 +70,7 @@ export default function MembershipClientView({
     setProcessingPlan(plan);
 
     try {
-      // 1. Create Subscription Order via dedicated endpoint
+      // 1. Create Subscription Order via dedicated authoritative endpoint
       const res = await fetch("/api/seller/membership/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -126,6 +127,12 @@ export default function MembershipClientView({
     }
   };
 
+  const getTheme = (planKey: string): PerimeterTheme => {
+    if (planKey === "BUSINESS") return "purple";
+    if (planKey === "PRO") return "blue";
+    return "slate";
+  };
+
   const plansList: MembershipPlan[] = ["BASIC", "PRO", "BUSINESS"];
 
   const formattedExpiry = membershipExpiresAt
@@ -137,10 +144,10 @@ export default function MembershipClientView({
     : null;
 
   return (
-    <div className="max-w-6xl mx-auto py-2">
+    <div className="max-w-6xl mx-auto py-2 pb-20 space-y-8">
       {/* Notifications */}
       {errorMessage && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-sm flex items-center justify-between">
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-sm flex items-center justify-between animate-in fade-in">
           <div className="flex items-center space-x-2">
             <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
             <span>{errorMessage}</span>
@@ -152,7 +159,7 @@ export default function MembershipClientView({
       )}
 
       {successMessage && (
-        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-sm flex items-center justify-between">
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-sm flex items-center justify-between animate-in fade-in">
           <div className="flex items-center space-x-2">
             <ShieldCheck className="w-5 h-5 text-emerald-600 flex-shrink-0" />
             <span className="font-semibold">{successMessage}</span>
@@ -165,7 +172,7 @@ export default function MembershipClientView({
 
       {/* Grace Period Warning */}
       {isInGracePeriod && (
-        <div className="mb-8 p-5 bg-amber-50 border border-amber-300 rounded-2xl text-amber-900 shadow-xs">
+        <div className="p-5 bg-amber-50 border-2 border-amber-300 rounded-2xl text-amber-900 shadow-xs">
           <div className="flex items-start space-x-3">
             <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
             <div>
@@ -181,17 +188,19 @@ export default function MembershipClientView({
       )}
 
       {/* Header & Status Card */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-xs">
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-xs">
         <div>
-          <span className="text-xs font-bold tracking-wider uppercase text-slate-500">Seller Store</span>
-          <h2 className="text-xl font-extrabold text-slate-900">{businessName || "My Store"}</h2>
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-xs text-slate-600">Current Plan:</span>
-            <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${MEMBERSHIP_PLANS[currentPlan].badgeColor}`}>
+          <span className="text-xs font-bold tracking-wider uppercase text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md">
+            Seller Store Tier &amp; Benefits
+          </span>
+          <h2 className="text-2xl font-black text-slate-900 mt-2">{businessName || "My Store"}</h2>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <span className="text-xs text-slate-600 font-medium">Current Plan:</span>
+            <span className={`text-xs font-extrabold px-3 py-0.5 rounded-full border ${MEMBERSHIP_PLANS[currentPlan].badgeColor}`}>
               {currentPlan}
             </span>
             <span
-              className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+              className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
                 membershipStatus === "active"
                   ? "bg-emerald-100 text-emerald-800"
                   : membershipStatus === "past_due"
@@ -212,15 +221,15 @@ export default function MembershipClientView({
         )}
       </div>
 
-      {/* Cycle Toggle */}
-      <div className="flex justify-center items-center mb-10">
-        <div className="bg-slate-100 p-1 rounded-xl flex items-center space-x-1 border border-slate-200">
+      {/* Billing Cycle Toggle */}
+      <div className="flex justify-center items-center">
+        <div className="bg-slate-100 p-1.5 rounded-2xl flex items-center space-x-1 border border-slate-200 shadow-inner">
           <button
             type="button"
             onClick={() => setBillingCycle("MONTHLY")}
-            className={`px-5 py-2 text-xs font-bold rounded-lg transition-all ${
+            className={`px-6 py-2.5 text-xs font-extrabold rounded-xl transition-all cursor-pointer ${
               billingCycle === "MONTHLY"
-                ? "bg-white text-slate-900 shadow-xs"
+                ? "bg-white text-slate-900 shadow-sm"
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
@@ -229,22 +238,22 @@ export default function MembershipClientView({
           <button
             type="button"
             onClick={() => setBillingCycle("YEARLY")}
-            className={`px-5 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+            className={`px-6 py-2.5 text-xs font-extrabold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
               billingCycle === "YEARLY"
-                ? "bg-white text-slate-900 shadow-xs"
+                ? "bg-white text-slate-900 shadow-sm"
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
             <span>Annual Billing</span>
-            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-1.5 py-0.5 rounded-md">
+            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
               Save ~17%
             </span>
           </button>
         </div>
       </div>
 
-      {/* Plans Comparison Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+      {/* Plans Comparison Grid with Animated Perimeter */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch pt-6 pb-6">
         {plansList.map((planKey) => {
           const plan = MEMBERSHIP_PLANS[planKey];
           const rule = feeRules?.[planKey];
@@ -252,8 +261,10 @@ export default function MembershipClientView({
           const isPaid = planKey === "PRO" || planKey === "BUSINESS";
           const pricing = isPaid ? getPlanPricing(planKey, billingCycle, rule) : null;
           const isProcessing = processingPlan === planKey;
+          const theme = getTheme(planKey);
 
           const displayName = rule?.display_name || plan.displayName;
+          const description = rule?.description || (planKey === "BASIC" ? "Essential toolkit for new sellers starting their eCommerce venture." : planKey === "PRO" ? "Ideal for scaling brands requiring unlimited product catalog and lower commission." : "Maximum performance tier offering our lowest commission rate and top ranking boost.");
           const maxProducts = rule?.max_products !== undefined ? rule.max_products : plan.maxProducts;
           const storageLimitMB = rule?.storage_limit_mb !== undefined ? rule.storage_limit_mb : plan.storageLimitMB;
           const adminUsersLimit = rule?.admin_users_limit !== undefined ? rule.admin_users_limit : plan.adminUsersLimit;
@@ -265,136 +276,181 @@ export default function MembershipClientView({
             : (planKey === "BASIC" ? "12%" : planKey === "PRO" ? "8%" : "5%");
 
           return (
-            <div
+            <AnimatedPerimeterCard
               key={planKey}
-              className={`bg-white rounded-2xl border p-8 flex flex-col justify-between relative transition-all shadow-xs hover:shadow-md ${
-                isCurrent
-                  ? "border-blue-600 ring-2 ring-blue-600/20"
-                  : planKey === "PRO"
-                  ? "border-blue-300 ring-1 ring-blue-100"
-                  : "border-slate-200"
-              }`}
+              theme={theme}
+              isCurrent={isCurrent}
+              className="h-full flex flex-col"
             >
-              {isCurrent && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[11px] font-extrabold px-3 py-0.5 rounded-full uppercase tracking-wider shadow-xs">
-                  Active Current Plan
-                </div>
-              )}
+              <div className="p-6 md:p-8 flex flex-col justify-between h-full space-y-6 relative">
+                {/* Floating Badges */}
+                {isCurrent ? (
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[10px] font-black px-3.5 py-1 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1 z-30 whitespace-nowrap">
+                    <Check className="w-3 h-3 stroke-[3]" /> Active Current Plan
+                  </div>
+                ) : planKey === "PRO" ? (
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[10px] font-black px-3.5 py-1 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1 z-30 whitespace-nowrap">
+                    <Sparkles className="w-3 h-3" /> Most Popular
+                  </div>
+                ) : null}
 
-              {planKey === "PRO" && !isCurrent && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[10px] font-extrabold px-3 py-0.5 rounded-full uppercase tracking-wider shadow-xs flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> Most Popular
-                </div>
-              )}
+                <div>
+                  <div className="flex justify-between items-center mb-3">
+                    <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full tracking-wider border ${plan.badgeColor}`}>
+                      {plan.name}
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-400">
+                      Tier {planKey === "BASIC" ? "1" : planKey === "PRO" ? "2" : "3"}
+                    </span>
+                  </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-xl font-bold text-slate-900">{displayName}</h3>
-                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${plan.badgeColor}`}>
-                    {plan.name}
-                  </span>
+                  <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                    {displayName}
+                    {planKey === "BUSINESS" && <Crown className="w-4 h-4 text-amber-500 fill-amber-400" />}
+                    {planKey === "PRO" && <Sparkles className="w-4 h-4 text-blue-600" />}
+                  </h3>
+                  <p className="text-slate-500 text-xs mt-1.5 line-clamp-2 min-h-[32px]">
+                    {description}
+                  </p>
+
+                  {/* Attractive Offer Pricing Display */}
+                  <div className="mt-5 pb-5 border-b border-slate-100 min-h-[96px] flex flex-col justify-center">
+                    {planKey === "BASIC" ? (
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-3xl font-black text-slate-900">Free</span>
+                        <span className="text-xs font-semibold text-slate-400">/ lifetime</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {/* Struck-through original price & Offer badge */}
+                        {pricing?.offerActive && (
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <span className="text-sm font-bold text-slate-400 line-through">
+                              ₹{pricing.originalBaseAmount?.toLocaleString("en-IN")}
+                            </span>
+                            <span className="bg-rose-100 text-rose-800 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse flex items-center gap-1">
+                              <Tag className="w-2.5 h-2.5" />
+                              {pricing.savingsPercentage ? `SAVE ${pricing.savingsPercentage}%` : (pricing.offerBadge || "LIMITED OFFER")}
+                            </span>
+                            {pricing.offerLabel && (
+                              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                                {pricing.offerLabel}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Effective price charged */}
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-black text-slate-900">
+                            ₹{pricing?.baseAmount.toLocaleString("en-IN")}
+                          </span>
+                          <span className="text-xs font-semibold text-slate-400">
+                            /{billingCycle === "YEARLY" ? "year" : "month"}
+                          </span>
+                        </div>
+
+                        {/* Tax and Total */}
+                        <div className="text-[11px] text-slate-500 mt-1">
+                          + 18% GST (₹{pricing?.taxAmount.toLocaleString("en-IN")}) ={" "}
+                          <strong className="text-slate-800 font-bold">
+                            ₹{pricing?.totalAmount.toLocaleString("en-IN")}
+                          </strong>{" "}
+                          total
+                        </div>
+
+                        {pricing?.offerActive && pricing?.savingsAmount && (
+                          <div className="text-[10px] text-emerald-700 font-bold mt-0.5">
+                            You save ₹{pricing.savingsAmount.toLocaleString("en-IN")} with this promotional tier!
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Feature Checklist */}
+                  <ul className="space-y-3 text-xs text-slate-700 pt-6">
+                    <li className="flex items-center">
+                      <Check className="w-4 h-4 text-emerald-600 mr-2.5 flex-shrink-0" />
+                      <span>Product Listings: <strong className="ml-1 font-bold text-slate-900">{maxProducts === null ? "Unlimited" : `${maxProducts} Products`}</strong></span>
+                    </li>
+
+                    <li className="flex items-center">
+                      <Check className="w-4 h-4 text-emerald-600 mr-2.5 flex-shrink-0" />
+                      <span>Platform Commission: <strong className="ml-1 font-bold text-blue-700">{commissionRatePct}</strong></span>
+                    </li>
+
+                    <li className="flex items-center">
+                      <Check className="w-4 h-4 text-emerald-600 mr-2.5 flex-shrink-0" />
+                      <span>Storage Space: <strong className="ml-1 font-bold text-slate-900">{storageLimitMB >= 1024 ? `${storageLimitMB / 1024} GB` : `${storageLimitMB} MB`}</strong></span>
+                    </li>
+
+                    <li className="flex items-center">
+                      <Check className="w-4 h-4 text-emerald-600 mr-2.5 flex-shrink-0" />
+                      <span>Store Admin Users: <strong className="ml-1 font-bold text-slate-900">{adminUsersLimit === null ? "Unlimited" : `${adminUsersLimit} Users`}</strong></span>
+                    </li>
+
+                    <li className="flex items-center">
+                      <Check className={`w-4 h-4 mr-2.5 flex-shrink-0 ${canCoupons ? "text-emerald-600" : "text-slate-300"}`} />
+                      <span>Store Coupons: <strong className="ml-1 font-bold text-slate-900">{canCoupons ? "Included" : "Disabled"}</strong></span>
+                    </li>
+
+                    <li className="flex items-center">
+                      <Check className={`w-4 h-4 mr-2.5 flex-shrink-0 ${bulkCsv ? "text-emerald-600" : "text-slate-300"}`} />
+                      <span>Bulk CSV Upload: <strong className="ml-1 font-bold text-slate-900">{bulkCsv ? "Included" : "Disabled"}</strong></span>
+                    </li>
+
+                    <li className="flex items-center">
+                      <Check className={`w-4 h-4 mr-2.5 flex-shrink-0 ${rankingBoost !== "Standard" ? "text-emerald-600" : "text-slate-400"}`} />
+                      <span>Search Ranking: <strong className="ml-1 font-bold text-slate-900">{rankingBoost}</strong></span>
+                    </li>
+
+                    <li className="flex items-center">
+                      <Check className={`w-4 h-4 mr-2.5 flex-shrink-0 ${plan.analytics !== "basic" ? "text-emerald-600" : "text-slate-300"}`} />
+                      <span>Advanced Sales Analytics</span>
+                    </li>
+                  </ul>
                 </div>
 
-                <div className="mb-6">
-                  {planKey === "BASIC" ? (
-                    <div>
-                      <span className="text-3xl font-extrabold text-slate-900">Free</span>
-                      <span className="text-xs text-slate-500 ml-1">forever</span>
-                    </div>
+                {/* Card Action Button */}
+                <div className="pt-4 border-t border-slate-100">
+                  {isCurrent ? (
+                    <button
+                      disabled
+                      className="w-full bg-slate-100 text-slate-500 font-bold py-3 px-4 rounded-xl text-xs text-center cursor-default flex items-center justify-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                      Current Active Plan
+                    </button>
+                  ) : isPaid ? (
+                    <button
+                      type="button"
+                      onClick={() => handleUpgrade(planKey)}
+                      disabled={isProcessing}
+                      className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold py-3 px-4 rounded-xl text-xs text-center transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {isProcessing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Opening Secure Payment...
+                        </>
+                      ) : (
+                        <>
+                          Upgrade to {plan.name} <ArrowRight className="w-3.5 h-3.5" />
+                        </>
+                      )}
+                    </button>
                   ) : (
-                    <div>
-                      <div className="flex items-baseline">
-                        <span className="text-3xl font-extrabold text-slate-900">
-                          ₹{pricing?.baseAmount.toLocaleString("en-IN")}
-                        </span>
-                        <span className="text-xs text-slate-500 ml-1">
-                          /{billingCycle === "YEARLY" ? "year" : "month"}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500 mt-1">
-                        + 18% GST (₹{pricing?.taxAmount.toLocaleString("en-IN")}) = <strong>₹{pricing?.totalAmount.toLocaleString("en-IN")}</strong> total
-                      </div>
-                    </div>
+                    <button
+                      disabled
+                      className="w-full bg-slate-100 text-slate-400 font-bold py-3 px-4 rounded-xl text-xs text-center cursor-default"
+                    >
+                      Standard Base Tier
+                    </button>
                   )}
                 </div>
-
-                <ul className="space-y-3 text-xs text-slate-700 mb-8 border-t border-slate-100 pt-6">
-                  <li className="flex items-center font-medium">
-                    <Check className="w-4 h-4 text-emerald-600 mr-2 flex-shrink-0" />
-                    Product Listings: <strong className="ml-1 font-bold text-slate-900">{maxProducts === null ? "Unlimited" : `${maxProducts} Products`}</strong>
-                  </li>
-
-                  <li className="flex items-center">
-                    <Check className="w-4 h-4 text-emerald-600 mr-2 flex-shrink-0" />
-                    Platform Commission: <strong className="ml-1 font-bold text-blue-700">{commissionRatePct}</strong>
-                  </li>
-
-                  <li className="flex items-center">
-                    <Check className="w-4 h-4 text-emerald-600 mr-2 flex-shrink-0" />
-                    Storage Space: <strong className="ml-1 font-bold text-slate-900">{storageLimitMB >= 1024 ? `${storageLimitMB / 1024} GB` : `${storageLimitMB} MB`}</strong>
-                  </li>
-
-                  <li className="flex items-center">
-                    <Check className="w-4 h-4 text-emerald-600 mr-2 flex-shrink-0" />
-                    Store Admin Users: <strong className="ml-1 font-bold text-slate-900">{adminUsersLimit === null ? "Unlimited" : `${adminUsersLimit} Users`}</strong>
-                  </li>
-
-                  <li className="flex items-center">
-                    <Check className={`w-4 h-4 mr-2 flex-shrink-0 ${canCoupons ? "text-emerald-600" : "text-slate-300"}`} />
-                    Store Promotional Coupons: <strong className="ml-1 font-bold text-slate-900">{canCoupons ? "Included" : "Disabled"}</strong>
-                  </li>
-
-                  <li className="flex items-center">
-                    <Check className={`w-4 h-4 mr-2 flex-shrink-0 ${bulkCsv ? "text-emerald-600" : "text-slate-300"}`} />
-                    Bulk CSV Upload Tools: <strong className="ml-1 font-bold text-slate-900">{bulkCsv ? "Included" : "Disabled"}</strong>
-                  </li>
-
-                  <li className="flex items-center">
-                    <Check className={`w-4 h-4 mr-2 flex-shrink-0 ${rankingBoost !== "Standard" ? "text-emerald-600" : "text-slate-400"}`} />
-                    Search Ranking Boost: <strong className="ml-1 font-bold text-slate-900">{rankingBoost}</strong>
-                  </li>
-
-                  <li className="flex items-center">
-                    <Check className={`w-4 h-4 mr-2 flex-shrink-0 ${plan.analytics !== "basic" ? "text-emerald-600" : "text-slate-300"}`} />
-                    Advanced Sales Analytics
-                  </li>
-                </ul>
               </div>
-
-              {isCurrent ? (
-                <button
-                  disabled
-                  className="w-full bg-slate-100 text-slate-500 font-bold py-3 px-4 rounded-xl text-xs text-center cursor-default"
-                >
-                  Current Active Plan
-                </button>
-              ) : isPaid ? (
-                <button
-                  type="button"
-                  onClick={() => handleUpgrade(planKey)}
-                  disabled={isProcessing}
-                  className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold py-3 px-4 rounded-xl text-xs text-center transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Opening Secure Payment...
-                    </>
-                  ) : (
-                    <>
-                      Upgrade to {plan.name} <ArrowRight className="w-3.5 h-3.5" />
-                    </>
-                  )}
-                </button>
-              ) : (
-                <button
-                  disabled
-                  className="w-full bg-slate-100 text-slate-400 font-bold py-3 px-4 rounded-xl text-xs text-center cursor-default"
-                >
-                  Standard Base Tier
-                </button>
-              )}
-            </div>
+            </AnimatedPerimeterCard>
           );
         })}
       </div>

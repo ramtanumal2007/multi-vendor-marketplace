@@ -14,6 +14,7 @@ import {
   Package,
   ExternalLink,
   ShoppingBag,
+  RotateCcw,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
@@ -51,6 +52,12 @@ interface SellerProfile {
   seller_score: number | null;
   created_at: string;
   seller_id_code?: string;
+  rejection_reason?: string | null;
+  rejection_note?: string | null;
+  correction_reason?: string | null;
+  correction_note?: string | null;
+  reviewed_at?: string | null;
+  resubmitted_at?: string | null;
 }
 
 interface StoreInfo {
@@ -97,8 +104,11 @@ export function SellerDetailsModal({
 
   // Action Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogAction, setDialogAction] = useState<"approve" | "reject" | "return_for_correction" | "suspend" | "unsuspend">("approve");
-  const [adminComment, setAdminComment] = useState("");
+  const [dialogAction, setDialogAction] = useState<
+    "approve" | "reject" | "return_for_correction" | "reconsider" | "suspend" | "unsuspend"
+  >("approve");
+  const [actionReason, setActionReason] = useState("");
+  const [actionNote, setActionNote] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
   const supabase = createClient();
@@ -244,9 +254,12 @@ export function SellerDetailsModal({
     }
   };
 
-  const handleActionClick = (action: "approve" | "reject" | "return_for_correction" | "suspend" | "unsuspend") => {
+  const handleActionClick = (
+    action: "approve" | "reject" | "return_for_correction" | "reconsider" | "suspend" | "unsuspend"
+  ) => {
     setDialogAction(action);
-    setAdminComment("");
+    setActionReason("");
+    setActionNote("");
     setDialogOpen(true);
   };
 
@@ -255,47 +268,43 @@ export function SellerDetailsModal({
     setActionLoading(true);
 
     try {
-      if (dialogAction === "approve") {
-        const { error } = await supabase.rpc("approve_seller", { p_seller_id: seller.id });
-        if (error) throw error;
-        addToast({ title: "Approved", description: "Seller and store approved.", type: "success" });
-      } else if (dialogAction === "reject") {
-        const { error } = await supabase.rpc("reject_seller", { p_seller_id: seller.id });
-        if (error) throw error;
-        addToast({ title: "Rejected", description: "Seller rejected.", type: "success" });
-      } else if (dialogAction === "suspend") {
-        const { error } = await supabase.rpc("suspend_seller", { p_seller_id: seller.id });
-        if (error) throw error;
-        addToast({ title: "Suspended", description: "Seller suspended.", type: "success" });
-      } else if (dialogAction === "unsuspend") {
-        const { error } = await supabase.rpc("unsuspend_seller", { p_seller_id: seller.id });
-        if (error) {
-          // Fallback direct updates if RPC not yet deployed on DB instance
-          const { error: err1 } = await supabase.from("seller_profiles").update({ verification_status: "approved", updated_at: new Date().toISOString() }).eq("id", seller.id);
-          if (err1) throw err1;
-          await supabase.from("profiles").update({ role: "seller", updated_at: new Date().toISOString() }).eq("id", seller.id);
-          await supabase.from("stores").update({ status: "approved", updated_at: new Date().toISOString() }).eq("seller_id", seller.id);
-          await supabase.from("seller_application_events").insert({ seller_id: seller.id, event_type: "unsuspended" });
-        }
-        addToast({ title: "Reactivated", description: "Seller has been unsuspended and reactivated.", type: "success" });
-      } else if (dialogAction === "return_for_correction") {
-        if (!adminComment.trim()) throw new Error("Correction reason is required.");
-        const { error } = await supabase.rpc("return_for_correction", {
-          p_seller_id: seller.id,
-          p_comment: adminComment,
-        });
-        if (error) throw error;
-        addToast({ title: "Returned", description: "Returned for correction.", type: "success" });
+      const res = await fetch("/api/admin/sellers/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sellerId: seller.id,
+          action: dialogAction,
+          reason: actionReason.trim(),
+          note: actionNote.trim(),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to process seller action.");
       }
 
+      addToast({
+        title: "Success",
+        description: data.message || "Action processed successfully.",
+        type: "success",
+      });
+
       setDialogOpen(false);
-      fetchSellerDetails(seller.id);
+      await fetchSellerDetails(seller.id);
       if (onRefresh) onRefresh();
     } catch (err: unknown) {
-      const errObj = err as Error;
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Action failed.";
+
       addToast({
         title: "Error",
-        description: errObj.message || "Action failed.",
+        description: message,
         type: "error",
       });
     } finally {
@@ -610,16 +619,58 @@ export function SellerDetailsModal({
                   <CheckCircle className="w-3.5 h-3.5" /> Approve
                 </button>
                 <button
+                  onClick={() => handleActionClick("return_for_correction")}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <AlertCircle className="w-3.5 h-3.5" /> Return for Correction
+                </button>
+                <button
                   onClick={() => handleActionClick("reject")}
                   className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-semibold transition-colors"
                 >
                   <XCircle className="w-3.5 h-3.5" /> Reject
                 </button>
+              </>
+            ) : seller?.verification_status === "correction_required" ? (
+              <>
+                <button
+                  onClick={() => handleActionClick("approve")}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" /> Approve
+                </button>
                 <button
                   onClick={() => handleActionClick("return_for_correction")}
                   className="flex items-center gap-1 px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-semibold transition-colors"
                 >
-                  <AlertCircle className="w-3.5 h-3.5" /> Return for Correction
+                  <AlertCircle className="w-3.5 h-3.5" /> Update Correction
+                </button>
+                <button
+                  onClick={() => handleActionClick("reject")}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <XCircle className="w-3.5 h-3.5" /> Reject
+                </button>
+              </>
+            ) : seller?.verification_status === "rejected" ? (
+              <>
+                <button
+                  onClick={() => handleActionClick("reconsider")}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reconsider / Review
+                </button>
+                <button
+                  onClick={() => handleActionClick("approve")}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" /> Approve
+                </button>
+                <button
+                  onClick={() => handleActionClick("return_for_correction")}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <AlertCircle className="w-3.5 h-3.5" /> Correction
                 </button>
               </>
             ) : seller?.verification_status === "approved" ? (
@@ -654,72 +705,154 @@ export function SellerDetailsModal({
             dialogAction === "approve"
               ? "Approve Seller"
               : dialogAction === "reject"
-              ? "Reject Seller"
+              ? "Reject Seller Application"
               : dialogAction === "suspend"
               ? "Suspend Seller"
               : dialogAction === "unsuspend"
               ? "Unsuspend / Reactivate Seller"
+              : dialogAction === "reconsider"
+              ? "Reconsider Seller Application"
               : "Return for Correction"
           }
         >
-          <div>
-            <div className="flex items-start gap-4 mb-6">
+          <div className="space-y-4">
+            <div className="flex items-start gap-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
               <div
-                className={`p-3 rounded-full ${
+                className={`p-2.5 rounded-full flex-shrink-0 ${
                   dialogAction === "approve" || dialogAction === "unsuspend"
-                    ? "bg-green-100 text-green-600"
+                    ? "bg-green-100 text-green-700"
                     : dialogAction === "reject" || dialogAction === "suspend"
-                    ? "bg-red-100 text-red-600"
-                    : "bg-purple-100 text-purple-600"
+                    ? "bg-rose-100 text-rose-700"
+                    : dialogAction === "return_for_correction"
+                    ? "bg-purple-100 text-purple-700"
+                    : "bg-blue-100 text-blue-700"
                 }`}
               >
                 {dialogAction === "approve" || dialogAction === "unsuspend" ? (
-                  <CheckCircle className="w-6 h-6" />
+                  <CheckCircle className="w-5 h-5" />
+                ) : dialogAction === "reject" || dialogAction === "suspend" ? (
+                  <XCircle className="w-5 h-5" />
+                ) : dialogAction === "return_for_correction" ? (
+                  <AlertCircle className="w-5 h-5" />
                 ) : (
-                  <AlertCircle className="w-6 h-6" />
+                  <RotateCcw className="w-5 h-5" />
                 )}
               </div>
-              <div className="flex-1">
-                <p className="text-gray-600 text-sm mt-1">
-                  Are you sure you want to {dialogAction === "unsuspend" ? "unsuspend and reactivate" : dialogAction.replace(/_/g, " ")} the seller{" "}
-                  <strong>{seller.business_name || seller.contact_name}</strong>?
+              <div className="flex-1 text-xs">
+                <p className="text-slate-800 font-semibold text-sm">
+                  {seller.business_name || seller.contact_name}
                 </p>
-
-                {dialogAction === "return_for_correction" && (
-                  <div className="mt-4">
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Reason for Correction (required)
-                    </label>
-                    <textarea
-                      className="w-full border border-gray-300 rounded-md shadow-sm p-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
-                      rows={4}
-                      value={adminComment}
-                      onChange={(e) => setAdminComment(e.target.value)}
-                      placeholder="Explain what the seller needs to fix..."
-                    />
-                  </div>
-                )}
+                <p className="text-slate-500 mt-0.5">
+                  Current Status: <span className="font-bold uppercase text-slate-700">{seller.verification_status}</span>
+                </p>
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-              <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={actionLoading}>
+            {dialogAction === "return_for_correction" && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Correction Reason <span className="text-rose-500">* (Required)</span>
+                  </label>
+                  <textarea
+                    className="w-full border border-gray-300 rounded-md shadow-xs p-2.5 text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                    rows={2}
+                    value={actionReason}
+                    onChange={(e) => setActionReason(e.target.value)}
+                    placeholder="Explain clearly what corrections the applicant must make..."
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Admin Custom Note (Optional instructions for seller)
+                  </label>
+                  <textarea
+                    className="w-full border border-gray-300 rounded-md shadow-xs p-2.5 text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                    rows={2}
+                    value={actionNote}
+                    onChange={(e) => setActionNote(e.target.value)}
+                    placeholder="Provide additional guidance, contact details, or upload instructions..."
+                  />
+                </div>
+              </div>
+            )}
+
+            {dialogAction === "reject" && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Rejection Reason <span className="text-rose-500">* (Required)</span>
+                  </label>
+                  <textarea
+                    className="w-full border border-gray-300 rounded-md shadow-xs p-2.5 text-xs focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                    rows={2}
+                    value={actionReason}
+                    onChange={(e) => setActionReason(e.target.value)}
+                    placeholder="State reason for rejecting this application..."
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Admin Custom Message (Optional)
+                  </label>
+                  <textarea
+                    className="w-full border border-gray-300 rounded-md shadow-xs p-2.5 text-xs focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                    rows={2}
+                    value={actionNote}
+                    onChange={(e) => setActionNote(e.target.value)}
+                    placeholder="Additional message or appeal guidance for seller..."
+                  />
+                </div>
+              </div>
+            )}
+
+            {dialogAction === "reconsider" && (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-600">
+                  This will move the seller from <strong>{seller.verification_status}</strong> back to{" "}
+                  <strong>Under Review</strong>, enabling further actions (Approve, Request Correction, Reject).
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Reconsideration Note (Optional):
+                  </label>
+                  <textarea
+                    className="w-full border border-gray-300 rounded-md shadow-xs p-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    rows={2}
+                    value={actionNote}
+                    onChange={(e) => setActionNote(e.target.value)}
+                    placeholder="e.g., Documents verified via appeal; reopening application..."
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-gray-100">
+              <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)} disabled={actionLoading}>
                 Cancel
               </Button>
               <Button
                 variant="primary"
+                size="sm"
                 className={
                   dialogAction === "approve" || dialogAction === "unsuspend"
-                    ? "bg-green-600 hover:bg-green-700"
+                    ? "bg-green-600 hover:bg-green-700 text-white"
                     : dialogAction === "reject" || dialogAction === "suspend"
-                    ? "bg-red-600 hover:bg-red-700"
-                    : "bg-purple-600 hover:bg-purple-700"
+                    ? "bg-rose-600 hover:bg-rose-700 text-white"
+                    : dialogAction === "return_for_correction"
+                    ? "bg-purple-600 hover:bg-purple-700 text-white"
+                    : "bg-blue-600 hover:bg-blue-700 text-white"
                 }
                 onClick={executeAction}
                 isLoading={actionLoading}
-                disabled={dialogAction === "return_for_correction" && !adminComment.trim()}
+                disabled={
+                  (dialogAction === "return_for_correction" || dialogAction === "reject") &&
+                  !actionReason.trim()
+                }
               >
-                Confirm Action
+                Confirm {dialogAction.replace(/_/g, " ").toUpperCase()}
               </Button>
             </div>
           </div>

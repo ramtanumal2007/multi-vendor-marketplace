@@ -35,6 +35,18 @@ const nextConfig = {
       }
     ];
   },
+  async rewrites() {
+    return [
+      {
+        source: '/seller/application-tracking',
+        destination: '/seller/tracking',
+      },
+      {
+        source: '/seller/application-tracking/:path*',
+        destination: '/seller/tracking/:path*',
+      },
+    ];
+  },
 };
 
 export default nextConfig;

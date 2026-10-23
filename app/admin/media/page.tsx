@@ -1,0 +1,214 @@
+"use client";
+
+import React, { useState, useEffect, useCallback } from "react";
+import { Upload, Trash2, Copy, Image as ImageIcon, ShieldCheck } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
+import { createClient } from "@/lib/supabase";
+import {
+  validateStorageFile,
+  generateSafeFileName,
+  STORAGE_BUCKET_CONFIG,
+  StorageBucket,
+} from "@/lib/storage";
+
+interface MediaFile {
+  id: string;
+  name: string;
+  created_at?: string;
+  updated_at?: string;
+  last_accessed_at?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export default function AdminMediaPage() {
+  const [files, setFiles] = useState<MediaFile[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+  const [bucket, setBucket] = useState<StorageBucket>("brand-assets");
+  const { addToast } = useToast();
+  const supabase = createClient();
+
+  const fetchFiles = useCallback(async () => {
+    setIsLoading(true);
+    const { data, error } = await supabase.storage.from(bucket).list("", {
+      limit: 100,
+      offset: 0,
+      sortBy: { column: "created_at", order: "desc" },
+    });
+
+    if (error) {
+      addToast({ title: "Error fetching media", description: error.message, type: "error" });
+    } else if (data) {
+      // Filter out placeholders like .emptyFolderPlaceholder
+      const validFiles = (data as MediaFile[]).filter((f) => f.name !== ".emptyFolderPlaceholder");
+      setFiles(validFiles);
+    }
+    setIsLoading(false);
+  }, [bucket, supabase, addToast]);
+
+  useEffect(() => {
+    fetchFiles();
+  }, [fetchFiles]);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    
+    const file = e.target.files[0];
+
+    // Client/Server side validation according to bucket policy
+    const validation = validateStorageFile(
+      { name: file.name, size: file.size, type: file.type },
+      bucket
+    );
+
+    if (!validation.valid) {
+      addToast({
+        title: "Validation error",
+        description: validation.error || "File violates bucket policy constraints.",
+        type: "error",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    const fileName = generateSafeFileName(file.name, bucket);
+
+    const { error } = await supabase.storage.from(bucket).upload(fileName, file, {
+      contentType: file.type,
+      upsert: false,
+    });
+
+    setIsUploading(false);
+    
+    if (error) {
+      addToast({ title: "Upload failed", description: error.message, type: "error" });
+    } else {
+      addToast({ title: "File uploaded successfully", type: "success" });
+      fetchFiles();
+    }
+  };
+
+  const handleDelete = async (fileName: string) => {
+    if (!window.confirm("Are you sure you want to delete this file? This action cannot be undone.")) return;
+    
+    const { error } = await supabase.storage.from(bucket).remove([fileName]);
+    
+    if (error) {
+      addToast({ title: "Delete failed", description: error.message, type: "error" });
+    } else {
+      addToast({ title: "File deleted", type: "success" });
+      fetchFiles();
+    }
+  };
+
+  const handleCopyLink = (fileName: string) => {
+    const { data } = supabase.storage.from(bucket).getPublicUrl(fileName);
+    navigator.clipboard.writeText(data.publicUrl);
+    addToast({ title: "Link copied to clipboard", type: "success" });
+  };
+
+  const bucketConfig = STORAGE_BUCKET_CONFIG[bucket];
+
+  return (
+    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto h-full pb-12">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Media Library</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Manage marketplace brand assets, promotional banners, and category media.
+          </p>
+        </div>
+        
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          <select 
+            value={bucket}
+            onChange={(e) => setBucket(e.target.value as StorageBucket)}
+            className="bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+          >
+            <option value="brand-assets">Brand Assets (brand-assets)</option>
+            <option value="promotional-banners">Promotional Banners (promotional-banners)</option>
+            <option value="category-images">Category Images (category-images)</option>
+            <option value="product-images">Product Images (product-images)</option>
+          </select>
+          
+          <div className="relative">
+            <input 
+              type="file" 
+              accept={bucketConfig ? bucketConfig.allowedMimeTypes.join(",") : "image/*"} 
+              onChange={handleUpload} 
+              disabled={isUploading}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+            />
+            <Button variant="primary" className="flex items-center gap-2 pointer-events-none rounded-xl" disabled={isUploading}>
+              <Upload className="w-4 h-4" /> {isUploading ? "Uploading..." : "Upload File"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {bucketConfig && (
+        <div className="flex items-center justify-between text-xs px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-600">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span><strong>Active Bucket:</strong> {bucketConfig.name} ({bucketConfig.isPublic ? "Public" : "Private"})</span>
+            <span className="text-slate-300">|</span>
+            <span>Max Size: {Math.round(bucketConfig.maxSizeBytes / (1024 * 1024))} MB</span>
+          </div>
+          <span className="text-slate-400 hidden md:inline">{bucketConfig.description}</span>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 min-h-[500px]">
+        {isLoading ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : files.length === 0 ? (
+          <div className="flex flex-col justify-center items-center h-64 text-slate-500">
+            <ImageIcon className="w-12 h-12 text-slate-300 mb-4" />
+            <p className="text-lg font-medium">No files found</p>
+            <p className="text-sm mt-1">Upload an image to get started</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+            {files.map((file) => {
+              const { data } = supabase.storage.from(bucket).getPublicUrl(file.name);
+              const url = data.publicUrl;
+              
+              return (
+                <div key={file.id} className="group flex flex-col gap-2 relative">
+                  <div className="aspect-square bg-slate-100 rounded-lg overflow-hidden border border-slate-200 relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt={file.name} className="object-cover w-full h-full" loading="lazy" />
+                    
+                    {/* Hover actions */}
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                      <button 
+                        onClick={() => handleCopyLink(file.name)}
+                        className="p-2 bg-white rounded-full text-slate-700 hover:text-accent hover:scale-110 transition-all"
+                        title="Copy Link"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => handleDelete(file.name)}
+                        className="p-2 bg-white rounded-full text-slate-700 hover:text-red-600 hover:scale-110 transition-all"
+                        title="Delete File"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="truncate text-xs text-slate-600 font-medium" title={file.name}>
+                    {file.name}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

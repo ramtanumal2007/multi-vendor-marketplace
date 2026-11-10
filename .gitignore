@@ -1,0 +1,59 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Local development / temporary files
+lint_all.txt
+lint_output.txt
+lint_remaining.txt
+supabase/.temp/
+.vercel
+.env*
+
+vsm_local_db_backup_*.dump
+package.json.before-security-update.bak
+package-lock.json.before-security-update.bak
+supabase/metadata_archive/
+
+# Temporary audit and investigation files
+scratch/
+scratch_verify_db.js
+check_lucide.js
+test_cashfree_integration.js
+
+app.before-next15-migration/
+
+!.env.example

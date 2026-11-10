@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/membership-expiry",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/settlement-holds",
+      "schedule": "0 */4 * * *"
+    }
+  ]
+}

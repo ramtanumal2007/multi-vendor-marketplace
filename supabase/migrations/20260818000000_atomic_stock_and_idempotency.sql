@@ -121,6 +121,11 @@ DECLARE
     v_order RECORD;
     v_item JSONB;
     v_prod RECORD;
+    v_var RECORD;
+    v_prod_id UUID;
+    v_var_id UUID;
+    v_qty INT;
+    v_rows INT;
     v_order_id UUID;
     v_coupon_code TEXT;
 BEGIN
@@ -144,32 +149,164 @@ BEGIN
         END IF;
     END IF;
 
-    -- 2. Lock and conditionally decrement stock for each item in sorted order to prevent deadlocks
+    -- 2. Deterministic topological locking: lock all products first, then all variants second
+    -- Phase 2a: Lock unique products in ascending product_id order
+    FOR v_prod_id IN
+        SELECT DISTINCT (value->>'product_id')::UUID
+        FROM jsonb_array_elements(p_order_items)
+        WHERE (value->>'product_id') IS NOT NULL
+          AND (value->>'product_id') <> ''
+          AND (value->>'product_id') <> 'null'
+        ORDER BY (value->>'product_id')::UUID
+    LOOP
+        PERFORM 1
+        FROM public.products
+        WHERE id = v_prod_id
+        FOR UPDATE;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Product "%" is no longer available.', v_prod_id;
+        END IF;
+    END LOOP;
+
+    -- Phase 2b: Lock unique variants in ascending variant_id order
+    FOR v_var_id IN
+        SELECT DISTINCT (value->>'variant_id')::UUID
+        FROM jsonb_array_elements(p_order_items)
+        WHERE (value->>'variant_id') IS NOT NULL
+          AND (value->>'variant_id') <> ''
+          AND (value->>'variant_id') <> 'null'
+        ORDER BY (value->>'variant_id')::UUID
+    LOOP
+        PERFORM 1
+        FROM public.product_variants
+        WHERE id = v_var_id
+        FOR UPDATE;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Variant "%" is no longer available.', v_var_id;
+        END IF;
+    END LOOP;
+
+    -- Phase 2c: Validate stock and atomically decrement
     FOR v_item IN 
         SELECT value FROM jsonb_array_elements(p_order_items) 
-        ORDER BY (value->>'product_id')::text 
+        ORDER BY 
+            COALESCE((value->>'product_id')::TEXT, ''),
+            COALESCE((value->>'variant_id')::TEXT, '')
     LOOP
+        v_prod_id := CASE 
+            WHEN (v_item->>'product_id') IS NOT NULL 
+                 AND (v_item->>'product_id') <> '' 
+                 AND (v_item->>'product_id') <> 'null' 
+            THEN (v_item->>'product_id')::UUID 
+            ELSE NULL 
+        END;
+
+        -- Custom items (e.g. bespoke cake requests) have no catalog stock
+        IF v_prod_id IS NULL THEN
+            IF (v_item->>'variant_id') IS NOT NULL 
+               AND (v_item->>'variant_id') <> '' 
+               AND (v_item->>'variant_id') <> 'null' THEN
+                RAISE EXCEPTION 'INVALID_CUSTOM_ITEM: Custom items cannot specify a variant.';
+            END IF;
+            CONTINUE;
+        END IF;
+
+        v_qty := (v_item->>'quantity')::INT;
+        IF v_qty IS NULL OR v_qty <= 0 THEN
+            RAISE EXCEPTION 'INVALID_QUANTITY: Quantity for "%" must be greater than zero.', COALESCE(v_item->>'title', 'item');
+        END IF;
+
+        v_var_id := CASE 
+            WHEN (v_item->>'variant_id') IS NOT NULL 
+                 AND (v_item->>'variant_id') <> '' 
+                 AND (v_item->>'variant_id') <> 'null' 
+            THEN (v_item->>'variant_id')::UUID 
+            ELSE NULL 
+        END;
+
+        -- Read current row-locked product state
         SELECT id, title, stock_quantity, track_inventory, allow_backorders
         INTO v_prod
         FROM public.products
-        WHERE id = (v_item->>'product_id')::UUID
-        FOR UPDATE;
+        WHERE id = v_prod_id;
 
         IF NOT FOUND THEN
             RAISE EXCEPTION 'Product "%" is no longer available.', COALESCE(v_item->>'title', 'item');
         END IF;
 
-        IF v_prod.track_inventory AND NOT v_prod.allow_backorders THEN
-            IF v_prod.stock_quantity < (v_item->>'quantity')::INT THEN
-                RAISE EXCEPTION 'INSUFFICIENT_STOCK: Insufficient stock for "%". Available: %, Requested: %',
-                    v_prod.title, v_prod.stock_quantity, (v_item->>'quantity')::INT;
-            END IF;
-        END IF;
+        IF v_var_id IS NOT NULL THEN
+            -- Read current row-locked variant state
+            SELECT id, product_id, stock_quantity, sku
+            INTO v_var
+            FROM public.product_variants
+            WHERE id = v_var_id;
 
-        IF v_prod.track_inventory THEN
-            UPDATE public.products
-            SET stock_quantity = stock_quantity - (v_item->>'quantity')::INT
-            WHERE id = v_prod.id;
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'Selected variant for "%" is no longer available.', COALESCE(v_item->>'title', 'item');
+            END IF;
+
+            -- Validate variant belongs to the selected product (NULL-safe)
+            IF v_var.product_id IS DISTINCT FROM v_prod.id THEN
+                RAISE EXCEPTION 'Selected variant does not belong to product "%".', v_prod.title;
+            END IF;
+
+            -- Validate stock against requested quantity
+            IF v_prod.track_inventory AND NOT v_prod.allow_backorders THEN
+                IF COALESCE(v_prod.stock_quantity, 0) < v_qty THEN
+                    RAISE EXCEPTION 'INSUFFICIENT_STOCK: Insufficient stock for "%". Available: %, Requested: %',
+                        v_prod.title, COALESCE(v_prod.stock_quantity, 0), v_qty;
+                END IF;
+
+                IF v_var.stock_quantity IS NOT NULL AND v_var.stock_quantity < v_qty THEN
+                    RAISE EXCEPTION 'INSUFFICIENT_VARIANT_STOCK: Insufficient variant stock for "%". Available: %, Requested: %',
+                        COALESCE(v_item->>'title', v_prod.title), v_var.stock_quantity, v_qty;
+                END IF;
+            END IF;
+
+            -- Atomically decrement variant and product stock with fail-closed row count verification
+            IF v_prod.track_inventory THEN
+                IF v_var.stock_quantity IS NOT NULL THEN
+                    UPDATE public.product_variants
+                    SET stock_quantity = stock_quantity - v_qty
+                    WHERE id = v_var.id;
+
+                    GET DIAGNOSTICS v_rows = ROW_COUNT;
+                    IF v_rows = 0 THEN
+                        RAISE EXCEPTION 'VARIANT_STOCK_UPDATE_FAILED: %', v_var.id;
+                    END IF;
+                END IF;
+
+                UPDATE public.products
+                SET stock_quantity = stock_quantity - v_qty
+                WHERE id = v_prod.id;
+
+                GET DIAGNOSTICS v_rows = ROW_COUNT;
+                IF v_rows = 0 THEN
+                    RAISE EXCEPTION 'PRODUCT_STOCK_UPDATE_FAILED: %', v_prod.id;
+                END IF;
+            END IF;
+
+        ELSE
+            -- Non-variant product stock validation and decrement
+            IF v_prod.track_inventory AND NOT v_prod.allow_backorders THEN
+                IF COALESCE(v_prod.stock_quantity, 0) < v_qty THEN
+                    RAISE EXCEPTION 'INSUFFICIENT_STOCK: Insufficient stock for "%". Available: %, Requested: %',
+                        v_prod.title, COALESCE(v_prod.stock_quantity, 0), v_qty;
+                END IF;
+            END IF;
+
+            IF v_prod.track_inventory THEN
+                UPDATE public.products
+                SET stock_quantity = stock_quantity - v_qty
+                WHERE id = v_prod.id;
+
+                GET DIAGNOSTICS v_rows = ROW_COUNT;
+                IF v_rows = 0 THEN
+                    RAISE EXCEPTION 'PRODUCT_STOCK_UPDATE_FAILED: %', v_prod.id;
+                END IF;
+            END IF;
         END IF;
     END LOOP;
 
@@ -218,6 +355,7 @@ BEGIN
         INSERT INTO public.order_items (
             order_id,
             product_id,
+            variant_id,
             store_id,
             title,
             sku,
@@ -227,8 +365,9 @@ BEGIN
             variant_info
         ) VALUES (
             v_order_id,
-            (v_item->>'product_id')::UUID,
-            CASE WHEN (v_item->>'store_id') IS NOT NULL AND (v_item->>'store_id') <> '' THEN (v_item->>'store_id')::UUID ELSE NULL END,
+            CASE WHEN (v_item->>'product_id') IS NOT NULL AND (v_item->>'product_id') <> '' AND (v_item->>'product_id') <> 'null' THEN (v_item->>'product_id')::UUID ELSE NULL END,
+            CASE WHEN (v_item->>'variant_id') IS NOT NULL AND (v_item->>'variant_id') <> '' AND (v_item->>'variant_id') <> 'null' THEN (v_item->>'variant_id')::UUID ELSE NULL END,
+            CASE WHEN (v_item->>'store_id') IS NOT NULL AND (v_item->>'store_id') <> '' AND (v_item->>'store_id') <> 'null' THEN (v_item->>'store_id')::UUID ELSE NULL END,
             v_item->>'title',
             v_item->>'sku',
             (v_item->>'quantity')::INT,

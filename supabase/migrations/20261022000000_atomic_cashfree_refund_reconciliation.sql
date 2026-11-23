@@ -51,12 +51,38 @@ DECLARE
     v_audit_row RECORD;
     v_audit_vals JSONB;
     v_audit_ref_id TEXT;
+    v_audit_cf_ref_id TEXT;
+    v_audit_amount_text TEXT;
+    v_refund_status TEXT;
+    v_event_type TEXT;
+    v_elem JSONB;
     v_new_meta JSONB;
 BEGIN
     -- 1. Sanitize & Validate Inputs
     v_clean_ref_id := NULLIF(TRIM(p_refund_id), '');
     v_clean_cf_ref_id := NULLIF(TRIM(p_cf_refund_id), '');
     v_current_ref_key := COALESCE(v_clean_ref_id, v_clean_cf_ref_id);
+    v_refund_status := UPPER(NULLIF(TRIM(p_refund_status), ''));
+    v_event_type := UPPER(NULLIF(TRIM(p_event_type), ''));
+
+    IF p_order_id IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'error', 'MISSING_ORDER_ID');
+    END IF;
+
+    IF v_refund_status IS NULL OR v_refund_status NOT IN ('SUCCESS', 'PENDING', 'FAILED', 'CANCELLED') THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'UNCLASSIFIED_REFUND_STATUS',
+            'message', 'Refund status is not recognized; webhook must be retried or reviewed.'
+        );
+    END IF;
+
+    IF v_event_type = 'REFUND_SUCCESS_WEBHOOK' AND v_refund_status <> 'SUCCESS' THEN
+        RETURN jsonb_build_object('success', false, 'error', 'REFUND_EVENT_STATUS_MISMATCH');
+    END IF;
+    IF v_event_type = 'REFUND_FAILED_WEBHOOK' AND v_refund_status NOT IN ('FAILED', 'CANCELLED') THEN
+        RETURN jsonb_build_object('success', false, 'error', 'REFUND_EVENT_STATUS_MISMATCH');
+    END IF;
 
     IF v_current_ref_key IS NULL THEN
         RETURN jsonb_build_object(
@@ -67,7 +93,9 @@ BEGIN
     END IF;
 
     -- Strict check for NULL, zero, negative, or NaN refund amount
-    IF p_refund_amount IS NULL OR p_refund_amount <= 0 OR p_refund_amount = 'NaN'::numeric THEN
+    IF p_refund_amount IS NULL
+       OR p_refund_amount <= 0
+       OR p_refund_amount::text IN ('NaN', 'Infinity', '-Infinity') THEN
         RETURN jsonb_build_object(
             'success', false,
             'error', 'INVALID_REFUND_AMOUNT',
@@ -76,7 +104,8 @@ BEGIN
     END IF;
 
     v_clean_amount := ROUND(p_refund_amount, 2);
-    IF v_clean_amount <= 0 OR v_clean_amount = 'NaN'::numeric THEN
+    IF v_clean_amount <= 0
+       OR v_clean_amount::text IN ('NaN', 'Infinity', '-Infinity') THEN
         RETURN jsonb_build_object(
             'success', false,
             'error', 'INVALID_REFUND_AMOUNT',
@@ -110,7 +139,7 @@ BEGIN
 
     -- 3. Deterministic Row-Level Lock on Order Cancellations
     -- Priority: full order cancellation (order_item_id IS NULL) first, then latest by cancelled_at
-    SELECT id, metadata
+    SELECT id, order_item_id, metadata
     INTO v_cancellation
     FROM public.order_cancellations
     WHERE order_id = p_order_id
@@ -118,12 +147,43 @@ BEGIN
     LIMIT 1
     FOR UPDATE;
 
+    -- A refund reconciliation must be attached to a durable whole-order cancellation record.
+    -- The application persists this record before submitting the Cashfree refund.
+    IF v_cancellation.id IS NULL OR v_cancellation.order_item_id IS NOT NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'CANCELLATION_RECORD_NOT_FOUND',
+            'message', 'No cancellation record exists for this refund; manual review is required.'
+        );
+    END IF;
+
     -- 4. Reconstruct previously confirmed refunds
-    IF v_cancellation.id IS NOT NULL AND (v_cancellation.metadata->'successful_refunds') IS NOT NULL THEN
+    IF (v_cancellation.metadata->'successful_refunds') IS NOT NULL THEN
         IF jsonb_typeof(v_cancellation.metadata->'successful_refunds') = 'array' THEN
             v_recorded_refunds := v_cancellation.metadata->'successful_refunds';
         END IF;
     END IF;
+
+    -- Validate stored refund entries before using them in arithmetic or idempotency checks.
+    FOR v_elem IN SELECT value FROM jsonb_array_elements(v_recorded_refunds)
+    LOOP
+        IF jsonb_typeof(v_elem) <> 'object'
+           OR (
+               NULLIF(BTRIM(COALESCE(v_elem->>'refund_id', '')), '') IS NULL
+               AND NULLIF(BTRIM(COALESCE(v_elem->>'cf_refund_id', '')), '') IS NULL
+           )
+           OR (CASE
+               WHEN COALESCE(v_elem->>'amount', '') ~ '^[0-9]+([.][0-9]{1,2})?$'
+               THEN (v_elem->>'amount')::numeric <= 0
+               ELSE TRUE
+           END) THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'CORRUPT_REFUND_METADATA',
+                'message', 'Stored successful refund metadata is invalid; manual review is required.'
+            );
+        END IF;
+    END LOOP;
 
     -- Also check finance_audit_logs for confirmed refunds
     FOR v_audit_row IN
@@ -134,26 +194,50 @@ BEGIN
           AND action_type IN ('CASHFREE_REFUND_CONFIRMED', 'CASHFREE_PARTIAL_REFUND_CONFIRMED')
     LOOP
         v_audit_vals := COALESCE(v_audit_row.new_values, '{}'::jsonb);
-        v_audit_ref_id := COALESCE(v_audit_vals->>'refundId', v_audit_vals->>'cfRefundId');
-        
-        IF v_audit_ref_id IS NOT NULL AND v_audit_ref_id <> '' THEN
-            -- Check if already present in v_recorded_refunds
-            SELECT bool_or(
-                (elem->>'refund_id' = v_audit_ref_id) OR 
-                (elem->>'cf_refund_id' = v_audit_ref_id)
-            ) INTO v_already_processed
-            FROM jsonb_array_elements(v_recorded_refunds) AS elem;
+        v_audit_ref_id := NULLIF(BTRIM(v_audit_vals->>'refundId'), '');
+        v_audit_cf_ref_id := NULLIF(BTRIM(v_audit_vals->>'cfRefundId'), '');
+        v_audit_amount_text := COALESCE(v_audit_vals->>'refundAmount', '');
 
-            IF v_already_processed IS NOT TRUE THEN
-                v_recorded_refunds := v_recorded_refunds || jsonb_build_array(jsonb_build_object(
-                    'refund_id', v_audit_ref_id,
-                    'cf_refund_id', v_audit_vals->>'cfRefundId',
-                    'amount', (v_audit_vals->>'refundAmount')::numeric,
-                    'arn', v_audit_vals->>'refundArn',
-                    'status', 'SUCCESS',
-                    'confirmed_at', COALESCE(v_audit_vals->>'timestamp', NOW()::text)
-                ));
-            END IF;
+        IF v_audit_ref_id IS NULL AND v_audit_cf_ref_id IS NULL THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'CORRUPT_REFUND_AUDIT_IDENTIFIER',
+                'message', 'A prior confirmed refund audit row has no usable refund identifier.'
+            );
+        END IF;
+
+        IF (CASE
+            WHEN v_audit_amount_text ~ '^[0-9]+([.][0-9]{1,2})?$'
+            THEN v_audit_amount_text::numeric <= 0
+            ELSE TRUE
+        END) THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'CORRUPT_REFUND_AUDIT_AMOUNT',
+                'message', 'A prior confirmed refund audit row has an invalid amount.'
+            );
+        END IF;
+
+        -- Match BOTH identifiers independently; do not collapse them with COALESCE.
+        SELECT COALESCE(bool_or(
+            (v_audit_ref_id IS NOT NULL AND (
+                elem->>'refund_id' = v_audit_ref_id OR elem->>'cf_refund_id' = v_audit_ref_id
+            )) OR
+            (v_audit_cf_ref_id IS NOT NULL AND (
+                elem->>'refund_id' = v_audit_cf_ref_id OR elem->>'cf_refund_id' = v_audit_cf_ref_id
+            ))
+        ), FALSE) INTO v_already_processed
+        FROM jsonb_array_elements(v_recorded_refunds) AS elem;
+
+        IF v_already_processed IS NOT TRUE THEN
+            v_recorded_refunds := v_recorded_refunds || jsonb_build_array(jsonb_build_object(
+                'refund_id', v_audit_ref_id,
+                'cf_refund_id', v_audit_cf_ref_id,
+                'amount', v_audit_amount_text::numeric,
+                'arn', v_audit_vals->>'refundArn',
+                'status', 'SUCCESS',
+                'confirmed_at', COALESCE(v_audit_vals->>'timestamp', NOW()::text)
+            ));
         END IF;
     END LOOP;
 
@@ -183,11 +267,9 @@ BEGIN
     -- If order is already fully refunded:
     IF v_order.payment_status = 'refunded' THEN
         RETURN jsonb_build_object(
-            'success', true,
-            'received', true,
-            'already_refunded', true,
-            'order_id', p_order_id,
-            'refund_id', v_current_ref_key
+            'success', false,
+            'error', 'ORDER_ALREADY_REFUNDED_UNMATCHED_EVENT',
+            'message', 'Order is already marked refunded, but this refund identifier was not found in confirmed refund history.'
         );
     END IF;
 
@@ -206,7 +288,7 @@ BEGIN
     END IF;
 
     -- 8. Process SUCCESS refund
-    IF p_refund_status = 'SUCCESS' OR p_event_type = 'REFUND_SUCCESS_WEBHOOK' THEN
+    IF v_refund_status = 'SUCCESS' THEN
         v_is_fully_refunded := (v_new_cumulative_paise >= v_order_total_paise);
 
         -- Build this refund item
@@ -289,7 +371,7 @@ BEGIN
     END IF;
 
     -- 9. Handle PENDING refund
-    IF p_refund_status = 'PENDING' THEN
+    IF v_refund_status = 'PENDING' THEN
         -- Prevent duplicate PENDING audit log entries on retries
         SELECT EXISTS (
             SELECT 1 FROM public.finance_audit_logs
@@ -350,7 +432,7 @@ BEGIN
     END IF;
 
     -- 10. Handle FAILED or CANCELLED refund
-    IF p_refund_status IN ('FAILED', 'CANCELLED') OR p_event_type = 'REFUND_FAILED_WEBHOOK' THEN
+    IF v_refund_status IN ('FAILED', 'CANCELLED') THEN
         -- Prevent duplicate FAILED audit log entries on retries
         SELECT EXISTS (
             SELECT 1 FROM public.finance_audit_logs
@@ -413,10 +495,9 @@ BEGIN
     END IF;
 
     RETURN jsonb_build_object(
-        'success', true,
-        'received', true,
-        'unclassified_refund_status', p_refund_status,
-        'order_id', p_order_id
+        'success', false,
+        'error', 'UNHANDLED_REFUND_STATE',
+        'message', 'Refund state was not handled; webhook must not be acknowledged as successful.'
     );
 END;
 $function$;

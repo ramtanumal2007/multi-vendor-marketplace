@@ -33,7 +33,9 @@ BEGIN
         v_seq := v_seq + 1;
     END LOOP;
 
-    PERFORM setval('public.customer_id_seq', v_seq - 1);
+    IF v_seq > 1 THEN
+        PERFORM setval('public.customer_id_seq', v_seq - 1);
+    END IF;
 END $$;
 
 
@@ -41,12 +43,22 @@ END $$;
 -- Link ORD-10003 (ramtanumal2007@gmail.com) to Ramtanu's profile (4fca2811-fe1a-4e10-a3e8-756819a17b0c -> CUS-003)
 UPDATE public.orders
 SET user_id = '4fca2811-fe1a-4e10-a3e8-756819a17b0c'
-WHERE order_number = 'ORD-10003';
+WHERE order_number = 'ORD-10003'
+  AND EXISTS (
+    SELECT 1 FROM public.profiles p
+    JOIN auth.users u ON u.id = p.id
+    WHERE p.id = '4fca2811-fe1a-4e10-a3e8-756819a17b0c'::UUID
+  );
 
 -- Link ORD-10007 (SUDIP@GMAIL.COM) to Sudip's profile (247fdf0f-48fd-4dd4-aa34-91982068a8ad -> CUS-004)
 UPDATE public.orders
 SET user_id = '247fdf0f-48fd-4dd4-aa34-91982068a8ad'
-WHERE order_number = 'ORD-10007';
+WHERE order_number = 'ORD-10007'
+  AND EXISTS (
+    SELECT 1 FROM public.profiles p
+    JOIN auth.users u ON u.id = p.id
+    WHERE p.id = '247fdf0f-48fd-4dd4-aa34-91982068a8ad'::UUID
+  );
 
 -- Auto-link any other orders matching profile emails
 UPDATE public.orders o
@@ -77,8 +89,23 @@ UPDATE public.orders
 SET invoice_number = 'INV-' || REPLACE(order_number, 'ORD-', '')
 WHERE invoice_number IS NULL OR invoice_number = '' OR invoice_number NOT SIMILAR TO 'INV-[0-9]+';
 
--- Set order_number_seq to 10007 so the next order gets ORD-10008
-SELECT setval('public.order_number_seq', 10007);
+-- Keep the order sequence at or above both its current value and the
+-- highest ORD number already present. Never rewind a production sequence.
+DO $$
+DECLARE
+    v_sequence_last BIGINT;
+    v_max_order_number BIGINT;
+    v_safe_value BIGINT;
+BEGIN
+    SELECT last_value INTO v_sequence_last FROM public.order_number_seq;
+
+    SELECT COALESCE(MAX(substring(order_number FROM '^ORD-([0-9]+)$')::BIGINT), 10007)
+      INTO v_max_order_number
+      FROM public.orders;
+
+    v_safe_value := GREATEST(COALESCE(v_sequence_last, 10007), v_max_order_number, 10007);
+    PERFORM setval('public.order_number_seq'::regclass, v_safe_value, TRUE);
+END $$;
 
 
 -- 4. UPDATE ORDER ITEM CODES FOR CONVERTED ORDERS

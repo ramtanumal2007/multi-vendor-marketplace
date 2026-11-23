@@ -32,7 +32,8 @@ BEGIN
     UPDATE public.stores SET status = 'approved', updated_at = NOW() WHERE seller_id = p_seller_id;
 
     INSERT INTO public.seller_application_events (seller_id, event_type) 
-    VALUES (p_seller_id, 'unsuspended');
+    -- 'restored' is accepted by the original valid_events CHECK constraint.
+    VALUES (p_seller_id, 'restored');
 
     RETURN TRUE;
 END;

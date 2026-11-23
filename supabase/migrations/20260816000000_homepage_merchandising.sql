@@ -8,7 +8,7 @@ ALTER TABLE public.hero_slides ADD COLUMN IF NOT EXISTS end_date TIMESTAMPTZ;
 
 -- 2. Create homepage_sections table for admin-configurable homepage blocks
 CREATE TABLE IF NOT EXISTS public.homepage_sections (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     section_key TEXT UNIQUE NOT NULL,
     title TEXT NOT NULL,
     subtitle TEXT,

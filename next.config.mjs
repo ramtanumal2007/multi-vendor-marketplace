@@ -14,6 +14,10 @@ const nextConfig = {
         protocol: 'https',
         hostname: 'ddrwsbfrhuzunvgcezaw.supabase.co',
       },
+      {
+        protocol: 'https',
+        hostname: 'ftraeimnlcyzocsoutgn.supabase.co',
+      },
     ],
   },
   async redirects() {

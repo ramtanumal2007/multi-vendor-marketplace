@@ -344,34 +344,176 @@ export async function POST(req: Request) {
       }
     }
 
-    // Check 4: Idempotent Check: Look for existing order with this attempt ID or order ID
+    // Check 4: Idempotent Check: Look for existing order with this authoritative idempotency key
     interface ExistingOrderRow {
       id: string;
+      user_id?: string | null;
+      email?: string | null;
+      shipping_address?: any;
+      total: number;
       payment_status: string;
       payment_method?: string;
       order_number: string;
       invoice_number?: string;
       razorpay_payment_id?: string;
-    }
-
-    let existingOrder: ExistingOrderRow | null = null;
-    if (internalOrderId) {
-      const { data } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", internalOrderId)
-        .maybeSingle();
-      existingOrder = data;
+      internal_status?: string | null;
+      status?: string | null;
+      idempotency_key?: string | null;
     }
 
     const effectiveIdempotencyKey = cleanIdempotencyKey || draft.idempotencyKey;
-    if (!existingOrder && effectiveIdempotencyKey) {
+    let existingOrder: ExistingOrderRow | null = null;
+
+    if (effectiveIdempotencyKey) {
       const { data } = await supabase
         .from("orders")
         .select("*")
         .eq("idempotency_key", effectiveIdempotencyKey)
         .maybeSingle();
-      existingOrder = data;
+      existingOrder = data as ExistingOrderRow | null;
+    }
+
+    // Security Check: If caller provided an internalOrderId, it MUST match the authoritative existing order.
+    // Client-supplied orderId is NEVER used to look up or bind an unlinked order.
+    if (internalOrderId && existingOrder && existingOrder.id !== internalOrderId) {
+      console.error("Order ID mismatch during Cashfree verification:", {
+        payloadOrderId: internalOrderId,
+        authoritativeOrderId: existingOrder.id,
+      });
+      return NextResponse.json(
+        { success: false, message: "Order reference does not match checkout session." },
+        { status: 400 }
+      );
+    }
+
+    if (existingOrder) {
+      // 4a. User Ownership Verification
+      if (draft.userId) {
+        if (existingOrder.user_id && existingOrder.user_id !== draft.userId) {
+          console.error("Customer identity mismatch on existing order:", {
+            draftUserId: draft.userId,
+            orderUserId: existingOrder.user_id,
+          });
+          return NextResponse.json(
+            { success: false, message: "Order ownership does not match authenticated checkout session." },
+            { status: 403 }
+          );
+        }
+      } else {
+        // Guest checkout: verify guest email/phone matches if present
+        const draftPhone = String(draft.shippingAddress?.phone || draft.customerDetails?.phone || "").replace(/[^0-9]/g, "").slice(-10);
+        const draftEmail = String(draft.email || draft.customerDetails?.email || "").trim().toLowerCase();
+        const orderPhone = String(existingOrder.shipping_address?.phone || "").replace(/[^0-9]/g, "").slice(-10);
+        const orderEmail = String(existingOrder.email || existingOrder.shipping_address?.email || "").trim().toLowerCase();
+
+        if (draftPhone && orderPhone && draftPhone !== orderPhone) {
+          return NextResponse.json(
+            { success: false, message: "Guest contact details do not match the existing order." },
+            { status: 403 }
+          );
+        }
+        if (draftEmail && orderEmail && draftEmail !== orderEmail) {
+          return NextResponse.json(
+            { success: false, message: "Guest contact details do not match the existing order." },
+            { status: 403 }
+          );
+        }
+      }
+
+      // 4b. Strict Amount Verification in Integer Paise
+      const existingOrderPaise = Math.round(Number(existingOrder.total) * 100);
+      if (existingOrderPaise !== gatewayPaise || existingOrderPaise !== draftPaise) {
+        console.error("Order total mismatch on existing order:", {
+          existingOrderTotal: existingOrder.total,
+          existingOrderPaise,
+          gatewayPaise,
+          draftPaise,
+        });
+        return NextResponse.json(
+          { success: false, message: "Order total mismatch between order, draft, and payment gateway." },
+          { status: 400 }
+        );
+      }
+
+      // 4c. Cancelled Order Late Payment Protection
+      const orderInternalStatus = (existingOrder.internal_status || existingOrder.status || "").toUpperCase();
+      if (orderInternalStatus === "CANCELLED") {
+        console.warn("Payment received for cancelled order:", {
+          orderId: existingOrder.id,
+          orderNumber: existingOrder.order_number,
+          paymentReference,
+        });
+        try {
+          await supabase.from("finance_audit_logs").insert({
+            action_type: "PAYMENT_RECEIVED_FOR_CANCELLED_ORDER",
+            target_entity: "orders",
+            target_id: existingOrder.id,
+            notes: cashfreeOrderId,
+            new_values: {
+              cfOrderId: cashfreeOrderId,
+              cfPaymentId: paymentReference,
+              orderId: existingOrder.id,
+              orderNumber: existingOrder.order_number,
+              amount: gatewayPaise / 100,
+              status: "CANCELLED",
+              reason: "Payment verified after order was already cancelled",
+              timestamp: new Date().toISOString(),
+            },
+          });
+        } catch (auditErr) {
+          console.warn("Notice: Failed to insert cancelled order payment audit log:", auditErr);
+        }
+
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Order was previously cancelled. Payment captured but cannot be applied to cancelled order.",
+            order_number: existingOrder.order_number,
+            requires_reconciliation: true,
+          },
+          { status: 409 }
+        );
+      }
+
+      // 4d. Idempotent Check: If already marked paid
+      if (existingOrder.payment_status === "paid") {
+        const existingPaymentRef = existingOrder.razorpay_payment_id ? String(existingOrder.razorpay_payment_id) : null;
+        if (existingPaymentRef && existingPaymentRef !== paymentReference) {
+          console.warn("Distinct captured Cashfree payment detected for already paid order:", {
+            orderId: existingOrder.id,
+            existingPaymentRef,
+            incomingPaymentRef: paymentReference,
+          });
+          try {
+            await supabase.from("finance_audit_logs").insert({
+              action_type: "DUPLICATE_PAYMENT_CAPTURED",
+              target_entity: "orders",
+              target_id: existingOrder.id,
+              notes: cashfreeOrderId,
+              new_values: {
+                cfOrderId: cashfreeOrderId,
+                primaryPaymentId: existingPaymentRef,
+                duplicatePaymentId: paymentReference,
+                orderId: existingOrder.id,
+                orderNumber: existingOrder.order_number,
+                amount: gatewayPaise / 100,
+                status: "DUPLICATE_PAYMENT",
+                timestamp: new Date().toISOString(),
+              },
+            });
+          } catch (auditErr) {
+            console.warn("Notice: Failed to insert duplicate payment audit log:", auditErr);
+          }
+        }
+
+        return NextResponse.json({
+          success: true,
+          order: existingOrder,
+          order_number: existingOrder.order_number,
+          invoice_number: existingOrder.invoice_number,
+          is_duplicate: true,
+        });
+      }
     }
 
     // Check 5: Payment Replay Protection
@@ -381,7 +523,7 @@ export async function POST(req: Request) {
       .eq("razorpay_payment_id", paymentReference)
       .maybeSingle();
 
-    if (reusedPayment && (!internalOrderId || reusedPayment.id !== internalOrderId)) {
+    if (reusedPayment && (!existingOrder || reusedPayment.id !== existingOrder.id)) {
       return NextResponse.json(
         {
           success: false,
@@ -392,17 +534,6 @@ export async function POST(req: Request) {
     }
 
     if (existingOrder) {
-      // Idempotent: If already marked paid, return immediately
-      if (existingOrder.payment_status === "paid") {
-        return NextResponse.json({
-          success: true,
-          order: existingOrder,
-          order_number: existingOrder.order_number,
-          invoice_number: existingOrder.invoice_number,
-          is_duplicate: true,
-        });
-      }
-
       // Update pending order to paid and link Cashfree payment reference
       const { data: updatedOrder, error: updateErr } = await supabase
         .from("orders")
@@ -427,8 +558,9 @@ export async function POST(req: Request) {
     }
 
     // 6. Atomically Create Order via Server Function using Authoritative Draft Data
+    const { orderId: _ignoredOrderId, ...safeOrderPayload } = orderPayload;
     const orderCreateResult = await createOrderRecord({
-      ...orderPayload,
+      ...safeOrderPayload,
       userId: draft.userId || orderPayload.userId,
       email: draft.email || orderPayload.email,
       shippingAddress: draft.shippingAddress || orderPayload.shippingAddress,

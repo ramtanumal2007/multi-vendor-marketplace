@@ -1,6 +1,6 @@
 import { createAdminClient, type SupabaseClient } from "@/lib/supabase";
 import { withDbRetry } from "./db-retry";
-import { debitCustomerWallet, getOrCreateCustomerWallet } from "./wallet-service";
+import { debitCustomerWallet, getOrCreateCustomerWallet, validateMonetaryAmount } from "./wallet-service";
 
 export interface RestoreStockResult {
   success: boolean;
@@ -177,7 +177,7 @@ export function verifyMatchingOrder(
   existingOrder: Record<string, unknown>,
   params: CreateOrderParams,
   expectedGrandTotal?: number,
-  existingItems?: Array<{ product_id: string; quantity: number }>
+  existingItems?: Array<{ product_id: string | null; quantity: number; variant_id?: string | null }>
 ): OrderVerificationResult {
   const { userId, email, shippingAddress } = params;
 
@@ -299,34 +299,61 @@ export function verifyMatchingOrder(
     };
   }
 
-  // 4. Order Contents Validation (Item IDs & Quantities)
-  if (existingItems && Array.isArray(existingItems) && existingItems.length > 0 && Array.isArray(params.items)) {
-    if (existingItems.length !== params.items.length) {
+  // 4. Order Contents Validation (Item IDs, Variant IDs & Quantities)
+  if (!existingItems || !Array.isArray(existingItems) || existingItems.length === 0) {
+    return {
+      valid: false,
+      reason: "Order contents cannot be verified (persisted order items missing from database)",
+    };
+  }
+
+  if (!params.items || !Array.isArray(params.items) || params.items.length === 0) {
+    return {
+      valid: false,
+      reason: "Order contents cannot be verified (incoming cart items are empty)",
+    };
+  }
+
+  const getCompositeKey = (productId: unknown, variantId: unknown) => {
+    const p = productId !== null && productId !== undefined ? String(productId).trim() : "";
+    const v = variantId !== null && variantId !== undefined ? String(variantId).trim() : "";
+    return `${p}::${v}`;
+  };
+
+  // Aggregate quantities from persisted order items
+  const persistedMap = new Map<string, number>();
+  for (const item of existingItems) {
+    const key = getCompositeKey(item.product_id, item.variant_id);
+    persistedMap.set(key, (persistedMap.get(key) || 0) + Number(item.quantity));
+  }
+
+  // Aggregate quantities from incoming requested items
+  const requestedMap = new Map<string, number>();
+  for (const item of params.items) {
+    const key = getCompositeKey(item.productId, item.variantId);
+    requestedMap.set(key, (requestedMap.get(key) || 0) + Number(item.quantity));
+  }
+
+  if (persistedMap.size !== requestedMap.size) {
+    return {
+      valid: false,
+      reason: `Order contents mismatch: Distinct item count differs (persisted order has ${persistedMap.size}, cart has ${requestedMap.size})`,
+    };
+  }
+
+  for (const [key, reqQty] of Array.from(requestedMap.entries())) {
+    const extQty = persistedMap.get(key);
+    if (extQty === undefined) {
       return {
         valid: false,
-        reason: `Order contents mismatch: Item count differs (cart has ${params.items.length}, existing order has ${existingItems.length})`,
+        reason: `Order contents mismatch: Item "${key}" is not present in existing order`,
       };
     }
-
-    const existingMap = new Map<string, number>(
-      existingItems.map((i) => [String(i.product_id), Number(i.quantity)])
-    );
-
-    for (const item of params.items) {
-      const pId = String(item.productId);
-      const extQty = existingMap.get(pId);
-      if (extQty === undefined) {
-        return {
-          valid: false,
-          reason: `Order contents mismatch: Product "${pId}" is not present in existing order`,
-        };
-      }
-      if (extQty !== Number(item.quantity)) {
-        return {
-          valid: false,
-          reason: `Order contents mismatch: Quantity for product "${pId}" differs (requested ${item.quantity}, existing ${extQty})`,
-        };
-      }
+    if (extQty !== reqQty) {
+      return {
+        valid: false,
+        reason: `Order contents mismatch: Quantity for item "${key}" differs (requested ${reqQty}, existing ${extQty})`,
+      };
     }
   }
 
@@ -342,7 +369,367 @@ export function verifyMatchingOrder(
     }
   }
 
+  // 6. Wallet Amount Applied Validation
+  let requestedPaise = 0;
+  if (params.walletAmountApplied !== undefined && params.walletAmountApplied !== null) {
+    if (
+      typeof params.walletAmountApplied !== "number" ||
+      !Number.isFinite(params.walletAmountApplied) ||
+      params.walletAmountApplied < 0
+    ) {
+      return {
+        valid: false,
+        reason: "Invalid wallet amount applied (must be a non-negative finite number)",
+      };
+    }
+    if (params.walletAmountApplied > 0) {
+      const v = validateMonetaryAmount(params.walletAmountApplied);
+      if (!v.valid) {
+        return {
+          valid: false,
+          reason: `Invalid wallet amount applied: ${v.reason}`,
+        };
+      }
+      requestedPaise = v.paise;
+    }
+  }
+  const existingWalletNum = Number(existingOrder.wallet_amount_applied || 0);
+  const existingPaise = Math.round(existingWalletNum * 100);
+
+  // If the existing order already recorded a non-zero wallet debit, it must match requestedPaise exactly.
+  // If the existing order has 0 recorded (e.g. order committed before wallet debit/metadata update),
+  // we do not reject here if requestedPaise > 0; the caller will verify and reconcile the debit via
+  // verifyAndReconcileDuplicateWalletDebit after all other order attributes are verified.
+  if (existingPaise > 0 && requestedPaise !== existingPaise) {
+    return {
+      valid: false,
+      reason: `Wallet deduction mismatch (requested ₹${(requestedPaise / 100).toFixed(2)}, existing order has ₹${(existingPaise / 100).toFixed(2)})`,
+    };
+  }
+
   return { valid: true };
+}
+
+export interface DuplicateWalletVerificationResult {
+  valid: boolean;
+  reason?: string;
+  reconciled?: boolean;
+}
+
+export async function verifyAndReconcileDuplicateWalletDebit(
+  supabase: SupabaseClient,
+  existingOrder: Record<string, unknown>,
+  expectedWalletAmount: number,
+  callerUserId: string | null | undefined,
+  cleanIdempotencyKey: string | null
+): Promise<DuplicateWalletVerificationResult> {
+  const expectedPaise = Math.round(expectedWalletAmount * 100);
+  if (expectedPaise <= 0) {
+    return { valid: true };
+  }
+
+  // Do not fall back to unverified caller user ID if the existing order has no authenticated owner
+  const orderOwnerId = existingOrder.user_id ? String(existingOrder.user_id).trim() : null;
+  if (!orderOwnerId) {
+    return {
+      valid: false,
+      reason: "Existing order has no authenticated owner; wallet debit cannot be verified or reconciled.",
+    };
+  }
+
+  if (callerUserId && callerUserId.trim() !== orderOwnerId) {
+    return {
+      valid: false,
+      reason: "Customer identity mismatch: Caller user ID does not match order owner ID.",
+    };
+  }
+
+  const orderId = String(existingOrder.id);
+  const expectedKey = `WALLET_CHECKOUT_${cleanIdempotencyKey || orderId}`;
+
+  // 1. Query wallet ledger for exact expected idempotency key - fail closed on query error
+  const { data: txByKey, error: txKeyErr } = await supabase
+    .from("wallet_transactions")
+    .select("id, customer_id, reference_type, reference_id, type, direction, amount, idempotency_key")
+    .eq("idempotency_key", expectedKey)
+    .maybeSingle();
+
+  if (txKeyErr) {
+    return {
+      valid: false,
+      reason: `Database error querying wallet transaction by idempotency key: ${txKeyErr.message}`,
+    };
+  }
+
+  if (txByKey) {
+    // Confirm ledger entry belongs to the same customer, order reference, debit type, and exact amount in paise
+    const isSameCustomer = txByKey.customer_id === orderOwnerId;
+    const isOrderRef = txByKey.reference_type === "order" && String(txByKey.reference_id) === orderId;
+    const isDebit = txByKey.direction === "debit";
+    const isDebitType = txByKey.type === "WALLET_DEBIT" || txByKey.type === "WALLET_USED_FOR_REPLACEMENT";
+    const txPaise = Math.round(Number(txByKey.amount) * 100);
+    const isAmountMatch = txPaise === expectedPaise;
+
+    if (isSameCustomer && isOrderRef && isDebit && isDebitType && isAmountMatch) {
+      const currentAppliedPaise = Math.round(Number(existingOrder.wallet_amount_applied || 0) * 100);
+      if (currentAppliedPaise !== expectedPaise) {
+        const { error: updErr } = await supabase
+          .from("orders")
+          .update({ wallet_amount_applied: expectedPaise / 100 })
+          .eq("id", orderId);
+
+        if (updErr) {
+          return {
+            valid: false,
+            reason: `Wallet debit confirmed in ledger but updating order wallet metadata failed: ${updErr.message}`,
+          };
+        }
+      }
+      existingOrder.wallet_amount_applied = expectedPaise / 100;
+      return { valid: true, reconciled: currentAppliedPaise !== expectedPaise };
+    }
+
+    return {
+      valid: false,
+      reason: `Wallet ledger mismatch on duplicate check: Transaction ${txByKey.id} with key "${expectedKey}" does not match order owner (${orderOwnerId}), order ID (${orderId}), debit type, or exact expected amount ₹${(expectedPaise / 100).toFixed(2)}.`,
+    };
+  }
+
+  // 2. Query wallet ledger by reference_id and reference_type - fail closed on query error
+  // Do not accept an unrelated debit transaction simply because it has the same order reference
+  const { data: txByRef, error: refErr } = await supabase
+    .from("wallet_transactions")
+    .select("id, customer_id, reference_type, reference_id, type, direction, amount, idempotency_key")
+    .eq("reference_type", "order")
+    .eq("reference_id", orderId)
+    .eq("direction", "debit");
+
+  if (refErr) {
+    return {
+      valid: false,
+      reason: `Database error querying wallet transactions by order reference: ${refErr.message}`,
+    };
+  }
+
+  if (txByRef && txByRef.length > 0) {
+    const matchingTx = txByRef.find((t) => {
+      const matchCust = t.customer_id === orderOwnerId;
+      const matchType = t.type === "WALLET_DEBIT" || t.type === "WALLET_USED_FOR_REPLACEMENT";
+      const matchPaise = Math.round(Number(t.amount) * 100) === expectedPaise;
+      const matchKey = !t.idempotency_key || t.idempotency_key === expectedKey || t.idempotency_key.startsWith("WALLET_CHECKOUT_");
+      return matchCust && matchType && matchPaise && matchKey;
+    });
+
+    if (matchingTx) {
+      const currentAppliedPaise = Math.round(Number(existingOrder.wallet_amount_applied || 0) * 100);
+      if (currentAppliedPaise !== expectedPaise) {
+        const { error: updErr } = await supabase
+          .from("orders")
+          .update({ wallet_amount_applied: expectedPaise / 100 })
+          .eq("id", orderId);
+
+        if (updErr) {
+          return {
+            valid: false,
+            reason: `Wallet debit confirmed in ledger by reference but updating order wallet metadata failed: ${updErr.message}`,
+          };
+        }
+      }
+      existingOrder.wallet_amount_applied = expectedPaise / 100;
+      return { valid: true, reconciled: currentAppliedPaise !== expectedPaise };
+    }
+
+    return {
+      valid: false,
+      reason: `Existing debit transaction(s) on order ${orderId} do not match the expected customer, checkout debit type, or amount ₹${(expectedPaise / 100).toFixed(2)}.`,
+    };
+  }
+
+  // 3. No debit found in ledger: Attempt safe retry through idempotent debitCustomerWallet
+  const debitRetry = await debitCustomerWallet(supabase, {
+    customerId: orderOwnerId,
+    amount: expectedPaise / 100,
+    referenceType: "order",
+    referenceId: orderId,
+    description: `Wallet funds applied to Order #${existingOrder.order_number || orderId}`,
+    idempotencyKey: expectedKey,
+  });
+
+  if (!debitRetry.success) {
+    return {
+      valid: false,
+      reason: `Missing wallet debit for existing order could not be completed: ${debitRetry.message || "Insufficient balance"}.`,
+    };
+  }
+
+  // Verify resulting ledger transaction before declaring reconciliation successful
+  const { data: verifiedTx, error: verifyErr } = await supabase
+    .from("wallet_transactions")
+    .select("id, customer_id, reference_type, reference_id, type, direction, amount")
+    .eq("idempotency_key", expectedKey)
+    .maybeSingle();
+
+  if (verifyErr || !verifiedTx) {
+    return {
+      valid: false,
+      reason: `Debit retry returned success but resulting ledger transaction could not be verified: ${verifyErr?.message || "Transaction record not found in ledger"}.`,
+    };
+  }
+
+  const vPaise = Math.round(Number(verifiedTx.amount) * 100);
+  const isPostRetryValid =
+    verifiedTx.customer_id === orderOwnerId &&
+    verifiedTx.reference_type === "order" &&
+    String(verifiedTx.reference_id) === orderId &&
+    verifiedTx.direction === "debit" &&
+    (verifiedTx.type === "WALLET_DEBIT" || verifiedTx.type === "WALLET_USED_FOR_REPLACEMENT") &&
+    vPaise === expectedPaise;
+
+  if (!isPostRetryValid) {
+    return {
+      valid: false,
+      reason: `Post-retry ledger verification failed: Transaction ${verifiedTx.id} parameters do not match expected order debit.`,
+    };
+  }
+
+  // Check and handle the result/error of order metadata update
+  const currentAppliedPaise = Math.round(Number(existingOrder.wallet_amount_applied || 0) * 100);
+  if (currentAppliedPaise !== expectedPaise) {
+    const { error: updErr } = await supabase
+      .from("orders")
+      .update({ wallet_amount_applied: expectedPaise / 100 })
+      .eq("id", orderId);
+
+    if (updErr) {
+      return {
+        valid: false,
+        reason: `Wallet debit succeeded but updating order wallet metadata failed: ${updErr.message}`,
+      };
+    }
+  }
+
+  existingOrder.wallet_amount_applied = expectedPaise / 100;
+  return { valid: true, reconciled: true };
+}
+
+interface OrderWalletFailureParams {
+  orderId: string;
+  orderNumber: string;
+  appliedWallet: number;
+  paymentMethod?: string;
+  paymentRef?: string | null;
+  couponCode?: string | null;
+  debitErrorMessage: string;
+  isFallback?: boolean;
+}
+
+async function handleOrderWalletDebitFailure(
+  supabase: SupabaseClient,
+  params: OrderWalletFailureParams
+): Promise<{ success: false; message: string; status: number }> {
+  const {
+    orderId,
+    orderNumber,
+    appliedWallet,
+    paymentMethod,
+    paymentRef,
+    couponCode,
+    debitErrorMessage,
+    isFallback,
+  } = params;
+
+  let stockRestorationAttempted = false;
+  let compensationError: string | null = null;
+
+  if (paymentRef) {
+    // A gateway payment was captured. Keep the order in review and never restore
+    // stock or release the coupon until payment reconciliation is completed.
+    const note = `[PAYMENT_REVIEW_REQUIRED] Gateway payment was captured (Ref: ${paymentRef}), but wallet debit of ₹${appliedWallet.toFixed(2)} failed (${debitErrorMessage}). Order kept in pending payment review; stock and coupon were not restored.`;
+
+    const { error: updErr } = await supabase
+      .from("orders")
+      .update({
+        payment_status: "pending",
+        wallet_amount_applied: 0,
+        notes: note,
+      })
+      .eq("id", orderId);
+
+    if (updErr) {
+      compensationError = updErr.message;
+      console.error("Critical: Failed updating order review status for gateway wallet debit failure:", updErr.message);
+    }
+  } else {
+    // One database transaction restores stock idempotently, marks the order
+    // cancelled, and releases its coupon only after cancellation is persisted.
+    stockRestorationAttempted = true;
+    const { data: compensationData, error: compensationRpcError } = await supabase.rpc(
+      "compensate_order_wallet_debit_failure",
+      {
+        p_order_id: orderId,
+        p_coupon_code: couponCode || null,
+        p_failure_note: `Wallet debit of ₹${appliedWallet.toFixed(2)} failed (${debitErrorMessage})${isFallback ? " in fallback flow" : ""}.`,
+      }
+    );
+
+    if (compensationRpcError || !compensationData || compensationData.success !== true) {
+      compensationError =
+        compensationRpcError?.message ||
+        compensationData?.message ||
+        "Compensation RPC returned an unconfirmed result";
+      console.error(`Critical: Order compensation failed for ${orderId}:`, compensationError);
+    }
+  }
+
+  // Preserve an application-level audit record. The SQL RPC also keeps stock
+  // ledger and coupon anomaly changes in the same transaction as compensation.
+  try {
+    const { error: auditErr } = await supabase.from("finance_audit_logs").insert({
+      action_type: paymentRef ? "GATEWAY_PAYMENT_WALLET_DESYNC" : "ORDER_WALLET_DEBIT_FAILED",
+      target_entity: "orders",
+      target_id: orderId,
+      notes: `Order #${orderNumber} wallet debit failed: ${debitErrorMessage}`,
+      new_values: {
+        order_id: orderId,
+        order_number: orderNumber,
+        applied_wallet: appliedWallet,
+        payment_method: paymentMethod,
+        payment_ref: paymentRef || null,
+        stock_restoration_attempted: stockRestorationAttempted,
+        coupon_code: couponCode || null,
+        compensation_error: compensationError,
+        is_fallback: Boolean(isFallback),
+        error: debitErrorMessage,
+      },
+    });
+    if (auditErr) {
+      console.error("Notice: finance_audit_logs insert error:", auditErr.message);
+    }
+  } catch (auditCatch) {
+    console.error("Notice: finance_audit_logs insert exception:", auditCatch);
+  }
+
+  if (paymentRef) {
+    return {
+      success: false,
+      message: `Gateway payment was captured (${paymentRef}) but wallet debit of ₹${appliedWallet.toFixed(2)} failed (${debitErrorMessage}). Order has been placed in pending payment review for reconciliation.${compensationError ? ` Review status update also failed: ${compensationError}` : ""}`,
+      status: 402,
+    };
+  }
+
+  if (compensationError) {
+    return {
+      success: false,
+      message: `Wallet debit of ₹${appliedWallet.toFixed(2)} failed: ${debitErrorMessage}. Automatic order compensation could not be confirmed (${compensationError}). Manual reconciliation is required.`,
+      status: 500,
+    };
+  }
+
+  return {
+    success: false,
+    message: `Wallet debit of ₹${appliedWallet.toFixed(2)} failed: ${debitErrorMessage}. Order was cancelled, stock restoration was processed idempotently, and eligible coupon redemption was released.`,
+    status: 400,
+  };
 }
 
 export interface CreateOrderResult {
@@ -401,17 +788,33 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
       .maybeSingle();
 
     if (existingOrder) {
+      if (existingOrder.payment_status === "failed") {
+        return {
+          success: false,
+          message: "Previous checkout attempt with this idempotency key failed payment.",
+          status: 409,
+        };
+      }
+
       // Query existing order items to verify order contents
-      const { data: existingItems } = await supabase
+      const { data: existingItems, error: itemsErr } = await supabase
         .from("order_items")
-        .select("product_id, quantity")
+        .select("product_id, variant_id, quantity")
         .eq("order_id", existingOrder.id);
+
+      if (itemsErr || !existingItems || existingItems.length === 0) {
+        return {
+          success: false,
+          message: `Idempotency verification failed: ${itemsErr?.message || "Persisted order items missing from database"}`,
+          status: 409,
+        };
+      }
 
       const verification = verifyMatchingOrder(
         existingOrder,
         params,
         params.expectedTotal,
-        existingItems || undefined
+        existingItems
       );
 
       if (!verification.valid) {
@@ -421,6 +824,53 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
           message: `Idempotency verification failed: ${verification.reason}`,
           status: 409,
         };
+      }
+
+      // Verify and reconcile wallet debit state if wallet funds were involved
+      let requestedWalletPaise = 0;
+      if (params.walletAmountApplied !== undefined && params.walletAmountApplied !== null) {
+        if (
+          typeof params.walletAmountApplied !== "number" ||
+          !Number.isFinite(params.walletAmountApplied) ||
+          params.walletAmountApplied < 0
+        ) {
+          return {
+            success: false,
+            message: "Invalid wallet amount specified.",
+            status: 400,
+          };
+        }
+        if (params.walletAmountApplied > 0) {
+          const v = validateMonetaryAmount(params.walletAmountApplied);
+          if (!v.valid) {
+            return {
+              success: false,
+              message: `Invalid wallet amount specified: ${v.reason}`,
+              status: 400,
+            };
+          }
+          requestedWalletPaise = v.paise;
+        }
+      }
+
+      const existingWalletPaise = Math.round(Number(existingOrder.wallet_amount_applied || 0) * 100);
+      const effectiveWalletPaise = requestedWalletPaise || existingWalletPaise;
+
+      if (effectiveWalletPaise > 0) {
+        const walletVerification = await verifyAndReconcileDuplicateWalletDebit(
+          supabase,
+          existingOrder,
+          effectiveWalletPaise / 100,
+          userId,
+          cleanIdempotencyKey
+        );
+        if (!walletVerification.valid) {
+          return {
+            success: false,
+            message: `Duplicate order wallet verification failed: ${walletVerification.reason}`,
+            status: 409,
+          };
+        }
       }
 
       return {
@@ -517,7 +967,17 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
       }
     }
 
-    if (dbP.track_inventory && !dbP.allow_backorders) {
+    // Inventory tracking must be known at checkout so the order-item snapshot
+    // can later drive an exact, idempotent stock compensation.
+    if (dbP.track_inventory !== true && dbP.track_inventory !== false) {
+      return {
+        success: false,
+        message: `Inventory tracking configuration is invalid for "${dbP.title}". Please contact support.`,
+        status: 500,
+      };
+    }
+
+    if (dbP.track_inventory === true && !dbP.allow_backorders) {
       const availableStock = dbP.stock_quantity ?? 0;
       if (availableStock < item.quantity) {
         return {
@@ -550,6 +1010,9 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
       unit_price: effectivePrice,
       line_total: lineTotal,
       variant_info: item.variantInfo || null,
+      // Snapshot the authoritative checkout-time setting. The database trigger
+      // fills this for the atomic RPC path if the RPC's legacy INSERT omits it.
+      inventory_tracked_at_checkout: dbP.track_inventory === true,
     };
   });
 
@@ -677,7 +1140,24 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
   let grandTotal = Math.round((subtotalAfterDiscount + finalShippingCost + effectiveTax) * 100) / 100;
 
   // Apply wallet deduction if customer opted to use wallet balance
-  const appliedWallet = params.walletAmountApplied && Number(params.walletAmountApplied) > 0 ? Number(params.walletAmountApplied) : 0;
+  let appliedWallet = 0;
+  if (params.walletAmountApplied !== undefined && params.walletAmountApplied !== null) {
+    if (
+      typeof params.walletAmountApplied !== "number" ||
+      !Number.isFinite(params.walletAmountApplied) ||
+      params.walletAmountApplied < 0
+    ) {
+      return { success: false, message: "Invalid wallet amount specified.", status: 400 };
+    }
+    if (params.walletAmountApplied > 0) {
+      const validated = validateMonetaryAmount(params.walletAmountApplied);
+      if (!validated.valid) {
+        return { success: false, message: `Invalid wallet amount specified: ${validated.reason}`, status: 400 };
+      }
+      appliedWallet = validated.amount;
+    }
+  }
+
   if (appliedWallet > 0) {
     if (!userId) {
       return { success: false, message: "User must be authenticated to use wallet balance.", status: 401 };
@@ -736,14 +1216,56 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
         .maybeSingle();
 
       if (matchedOrder) {
+        if (matchedOrder.payment_status === "failed") {
+          return {
+            success: false,
+            message: "Previous checkout attempt with this idempotency key failed payment.",
+            status: 409,
+          };
+        }
+
+        const { data: existingItems, error: itemsErr } = await supabase
+          .from("order_items")
+          .select("product_id, variant_id, quantity")
+          .eq("order_id", matchedOrder.id);
+
+        if (itemsErr || !existingItems || existingItems.length === 0) {
+          return {
+            success: false,
+            message: `Duplicate checkout verification failed: ${itemsErr?.message || "Persisted order items missing from database"}`,
+            status: 409,
+          };
+        }
+
         const verification = verifyMatchingOrder(
           matchedOrder,
           params,
           grandTotal,
-          validatedItems.map((vi) => ({ product_id: vi.product_id, quantity: vi.quantity }))
+          existingItems
         );
 
         if (verification.valid) {
+          const matchedWalletPaise = Math.round(Number(matchedOrder.wallet_amount_applied || 0) * 100);
+          const requestedPaise = Math.round(appliedWallet * 100);
+          const effectiveWalletPaise = requestedPaise || matchedWalletPaise;
+
+          if (effectiveWalletPaise > 0) {
+            const walletVerification = await verifyAndReconcileDuplicateWalletDebit(
+              supabase,
+              matchedOrder,
+              effectiveWalletPaise / 100,
+              userId,
+              cleanIdempotencyKey
+            );
+            if (!walletVerification.valid) {
+              return {
+                success: false,
+                message: `Duplicate order wallet verification failed: ${walletVerification.reason}`,
+                status: 409,
+              };
+            }
+          }
+
           return {
             success: true,
             order: matchedOrder,
@@ -788,22 +1310,9 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
       if (params.replacementDifference !== undefined) extraUpdates.replacement_difference = params.replacementDifference;
       if (params.replacementOriginalValue !== undefined) extraUpdates.replacement_original_value = params.replacementOriginalValue;
     }
-    if (appliedWallet > 0) {
-      extraUpdates.wallet_amount_applied = appliedWallet;
-    }
-    if (Object.keys(extraUpdates).length > 0 && rpcData.order_id) {
-      try {
-        const { error: updErr } = await supabase.from("orders").update(extraUpdates).eq("id", rpcData.order_id);
-        if (updErr) {
-          console.warn("Notice: optional extra order columns update notice:", updErr.message);
-        }
-      } catch (errCatch) {
-        console.warn("Notice: optional extra order columns update exception:", errCatch);
-      }
-    }
 
     if (appliedWallet > 0 && userId) {
-      await debitCustomerWallet(supabase, {
+      const debitRes = await debitCustomerWallet(supabase, {
         customerId: userId,
         amount: appliedWallet,
         referenceType: "order",
@@ -811,6 +1320,44 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
         description: `Wallet funds applied to Order #${rpcData.order_number}`,
         idempotencyKey: `WALLET_CHECKOUT_${cleanIdempotencyKey || rpcData.order_id}`,
       });
+
+      if (!debitRes.success) {
+        return await handleOrderWalletDebitFailure(supabase, {
+          orderId: rpcData.order_id,
+          orderNumber: rpcData.order_number,
+          appliedWallet,
+          paymentMethod,
+          paymentRef,
+          couponCode: validatedCouponCode,
+          debitErrorMessage: debitRes.message || "Wallet debit failed",
+          isFallback: false,
+        });
+      }
+
+      extraUpdates.wallet_amount_applied = appliedWallet;
+    }
+
+    if (Object.keys(extraUpdates).length > 0 && rpcData.order_id) {
+      const { error: updErr } = await supabase.from("orders").update(extraUpdates).eq("id", rpcData.order_id);
+      if (updErr) {
+        console.error("Critical: Failed to persist order metadata/wallet updates:", updErr.message);
+        try {
+          await supabase.from("finance_audit_logs").insert({
+            action_type: "ORDER_METADATA_UPDATE_FAILED",
+            target_entity: "orders",
+            target_id: rpcData.order_id,
+            notes: `Failed to update order metadata: ${updErr.message}`,
+            new_values: { updates: extraUpdates, error: updErr.message },
+          });
+        } catch (auditErr) {
+          console.error("Notice: finance_audit_logs insert exception:", auditErr);
+        }
+        return {
+          success: false,
+          message: `Order was created, but failed to record final order details: ${updErr.message}. Please contact support with order #${rpcData.order_number}.`,
+          status: 500,
+        };
+      }
     }
 
     if (userId && shippingAddress) {
@@ -826,26 +1373,31 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
     };
   }
 
-  // If RPC threw an explicit insufficient stock exception, abort checkout with 409
-  if (rpcErr && rpcErr.message && rpcErr.message.includes("INSUFFICIENT_STOCK")) {
+  // 8. FAIL-CLOSED RPC ERROR & IDEMPOTENCY RECONCILIATION
+  // create_order_atomic is the sole authoritative order creation engine.
+  // Manual distributed checkout fallback is removed to eliminate variant stock desync and phantom stock deductions.
+
+  // 8a. Insufficient stock (parent or variant): return client-actionable 409
+  const isInsufficientStock = Boolean(
+    rpcErr?.message &&
+    (rpcErr.message.includes("INSUFFICIENT_STOCK") || rpcErr.message.includes("INSUFFICIENT_VARIANT_STOCK"))
+  );
+
+  if (isInsufficientStock) {
+    const cleanMsg = (rpcErr?.message || "")
+      .replace(/^.*INSUFFICIENT_VARIANT_STOCK:\s*/i, "")
+      .replace(/^.*INSUFFICIENT_STOCK:\s*/i, "");
     return {
       success: false,
-      message: rpcErr.message.replace("INSUFFICIENT_STOCK: ", ""),
+      message: cleanMsg || "One or more items in your cart are no longer available in the requested quantity.",
       status: 409,
     };
   }
 
-  // Handle unique constraint / duplicate idempotency_key conflict from concurrent RPC calls
-  const isRpcDuplicateConflict = Boolean(
-    rpcErr &&
-    cleanIdempotencyKey &&
-    (rpcErr.code === "23505" ||
-      rpcErr.message?.includes("idx_orders_idempotency_key") ||
-      rpcErr.message?.includes("idempotency_key") ||
-      rpcErr.message?.includes("unique constraint"))
-  );
-
-  if (isRpcDuplicateConflict) {
+  // 8b. Ambiguous outcome / Idempotency conflict reconciliation:
+  // If an idempotency key was supplied, check whether create_order_atomic already committed the order
+  // before a network drop, timeout, or duplicate concurrent request occurred.
+  if (cleanIdempotencyKey) {
     const { data: matchedOrder } = await supabase
       .from("orders")
       .select("*")
@@ -853,14 +1405,56 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
       .maybeSingle();
 
     if (matchedOrder) {
+      if (matchedOrder.payment_status === "failed") {
+        return {
+          success: false,
+          message: "Previous checkout attempt with this idempotency key failed payment.",
+          status: 409,
+        };
+      }
+
+      const { data: existingItems, error: itemsErr } = await supabase
+        .from("order_items")
+        .select("product_id, variant_id, quantity")
+        .eq("order_id", matchedOrder.id);
+
+      if (itemsErr || !existingItems || existingItems.length === 0) {
+        return {
+          success: false,
+          message: `Duplicate checkout verification failed: ${itemsErr?.message || "Persisted order items missing from database"}`,
+          status: 409,
+        };
+      }
+
       const verification = verifyMatchingOrder(
         matchedOrder,
         params,
         grandTotal,
-        validatedItems.map((vi) => ({ product_id: vi.product_id, quantity: vi.quantity }))
+        existingItems
       );
 
       if (verification.valid) {
+        const matchedWalletPaise = Math.round(Number(matchedOrder.wallet_amount_applied || 0) * 100);
+        const requestedPaise = Math.round(appliedWallet * 100);
+        const effectiveWalletPaise = requestedPaise || matchedWalletPaise;
+
+        if (effectiveWalletPaise > 0) {
+          const walletVerification = await verifyAndReconcileDuplicateWalletDebit(
+            supabase,
+            matchedOrder,
+            effectiveWalletPaise / 100,
+            userId,
+            cleanIdempotencyKey
+          );
+          if (!walletVerification.valid) {
+            return {
+              success: false,
+              message: `Duplicate order wallet verification failed: ${walletVerification.reason}`,
+              status: 409,
+            };
+          }
+        }
+
         return {
           success: true,
           order: matchedOrder,
@@ -870,339 +1464,38 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
           status: 200,
         };
       }
-    }
 
-    // Fail closed: Do NOT proceed to fallback, do NOT create a second order
-    return {
-      success: false,
-      message: "Concurrent checkout conflict: Order with this idempotency key already exists but could not be safely verified.",
-      status: 409,
-    };
-  }
-
-  // 8. APPLICATION-LEVEL ATOMIC FALLBACK WITH TRANSACTIONAL COMPENSATION
-  // Used if create_order_atomic RPC is not yet registered in schema cache.
-  const sortedItems = [...validatedItems].sort((a, b) => a.product_id.localeCompare(b.product_id));
-  const decrementedItems: { productId: string; quantity: number }[] = [];
-
-  try {
-    // Step A: Conditionally reserve stock for each item
-    for (const vi of sortedItems) {
-      const dbP = dbProdMap.get(vi.product_id);
-      if (dbP && dbP.track_inventory && !dbP.allow_backorders) {
-        const { data: decOk, error: decRpcErr } = await supabase.rpc("decrement_product_stock_atomic", {
-          p_product_id: vi.product_id,
-          p_quantity: vi.quantity,
-        });
-
-        let isSuccess = decOk === true;
-        if (decRpcErr) {
-          const { data: liveP } = await supabase
-            .from("products")
-            .select("stock_quantity")
-            .eq("id", vi.product_id)
-            .single();
-
-          const currentStock = liveP?.stock_quantity ?? 0;
-          if (currentStock >= vi.quantity) {
-            const { error: updErr } = await supabase
-              .from("products")
-              .update({ stock_quantity: currentStock - vi.quantity })
-              .eq("id", vi.product_id)
-              .gte("stock_quantity", vi.quantity);
-            isSuccess = !updErr;
-          } else {
-            isSuccess = false;
-          }
-        }
-
-        if (!isSuccess) {
-          const restorationResults: RestoreStockResult[] = [];
-          for (const dec of decrementedItems) {
-            restorationResults.push(await restoreStock(supabase, dec.productId, dec.quantity));
-          }
-          const failedRestorations = restorationResults.filter((r) => !r.success);
-          if (failedRestorations.length > 0) {
-            try {
-              await supabase.from("finance_audit_logs").insert({
-                action_type: "STOCK_RESTORATION_FAILED",
-                target_entity: "inventory",
-                target_id: null,
-                notes: `Stock restoration failed during insufficient stock rollback for "${vi.title}". Manual reconciliation required.`,
-                new_values: {
-                  failure_count: failedRestorations.length,
-                  failed_items: failedRestorations.map((f) => ({
-                    product_id: f.productId,
-                    quantity: f.quantity,
-                    error: f.error || "Unknown error",
-                  })),
-                },
-              });
-            } catch (auditErr) {
-              console.error("Notice: finance_audit_logs insert exception for stock restoration failure:", auditErr);
-            }
-          }
-
-          return {
-            success: false,
-            message: `Insufficient stock for "${vi.title}". It may have just sold out.`,
-            status: 409,
-          };
-        }
-
-        decrementedItems.push({ productId: vi.product_id, quantity: vi.quantity });
-      }
-    }
-
-    // Step B: Insert Order (Triggers generate ORD-XXXXX and INV-XXXXX)
-    const orderInsertPayload: Record<string, unknown> = {
-      ...orderDataPayload,
-    };
-    if (cleanIdempotencyKey) {
-      orderInsertPayload.idempotency_key = cleanIdempotencyKey;
-    }
-    if (paymentRef) {
-      orderInsertPayload.razorpay_payment_id = paymentRef;
-    }
-
-    let { data: orderData, error: orderErr } = await supabase
-      .from("orders")
-      .insert(orderInsertPayload)
-      .select()
-      .single();
-
-    // Check for unique constraint violation on idempotency_key or duplicate order
-    if (orderErr && (orderErr.code === "23505" || orderErr.message?.includes("unique") || orderErr.message?.includes("idempotency"))) {
-      // 1. Transactional compensation: restore all reserved stock immediately
-      const restorationResults: RestoreStockResult[] = [];
-      for (const dec of decrementedItems) {
-        const res = await restoreStock(supabase, dec.productId, dec.quantity);
-        restorationResults.push(res);
-      }
-
-      const failedRestorations = restorationResults.filter((r) => !r.success);
-      if (failedRestorations.length > 0) {
-        console.error("Stock restoration failures during duplicate conflict compensation:", failedRestorations);
-        try {
-          await supabase.from("finance_audit_logs").insert({
-            action_type: "STOCK_RESTORATION_FAILED",
-            target_entity: "inventory",
-            target_id: null,
-            notes: `Failed to restore stock for ${failedRestorations.length} product(s) during duplicate idempotency conflict resolution. Reconciliation required.`,
-            new_values: {
-              idempotency_key: cleanIdempotencyKey,
-              failure_count: failedRestorations.length,
-              failed_items: failedRestorations.map((f) => ({
-                product_id: f.productId,
-                quantity: f.quantity,
-                error: f.error || "Unknown restoration failure",
-              })),
-            },
-          });
-        } catch (auditErr) {
-          console.error("Notice: finance_audit_logs insert exception for stock restoration failure:", auditErr);
-        }
-
-        return {
-          success: false,
-          message: "Concurrent checkout conflict occurred and automatic stock restoration failed for reserved items. Support reconciliation required.",
-          status: 500,
-        };
-      }
-
-      // 2. Safely retrieve the existing matching order by idempotency key
-      if (cleanIdempotencyKey) {
-        const { data: duplicateOrder } = await supabase
-          .from("orders")
-          .select("*")
-          .eq("idempotency_key", cleanIdempotencyKey)
-          .maybeSingle();
-
-        if (duplicateOrder) {
-          const verification = verifyMatchingOrder(
-            duplicateOrder,
-            params,
-            grandTotal,
-            validatedItems.map((vi) => ({ product_id: vi.product_id, quantity: vi.quantity }))
-          );
-
-          if (verification.valid) {
-            return {
-              success: true,
-              order: duplicateOrder,
-              order_number: duplicateOrder.order_number,
-              invoice_number: duplicateOrder.invoice_number,
-              is_duplicate: true,
-              status: 200,
-            };
-          }
-        }
-      }
-
-      // 3. FAIL CLOSED: Never strip idempotency_key and never retry inserting a second order!
+      // Idempotency key exists in DB but payload verification failed
       return {
         success: false,
-        message: "Order with this idempotency key already exists but could not be safely verified.",
+        message: "Concurrent checkout conflict: Order with this idempotency key already exists but could not be safely verified.",
         status: 409,
       };
     }
-
-    if (orderErr || !orderData) {
-      const restorationResults: RestoreStockResult[] = [];
-      for (const dec of decrementedItems) {
-        restorationResults.push(await restoreStock(supabase, dec.productId, dec.quantity));
-      }
-      const failedRestorations = restorationResults.filter((r) => !r.success);
-      if (failedRestorations.length > 0) {
-        try {
-          await supabase.from("finance_audit_logs").insert({
-            action_type: "STOCK_RESTORATION_FAILED",
-            target_entity: "inventory",
-            target_id: null,
-            notes: `Stock restoration failed during order creation error compensation: ${orderErr?.message}`,
-            new_values: {
-              failure_count: failedRestorations.length,
-              failed_items: failedRestorations.map((f) => ({
-                product_id: f.productId,
-                quantity: f.quantity,
-                error: f.error || "Unknown error",
-              })),
-            },
-          });
-        } catch (auditErr) {
-          console.error("Notice: finance_audit_logs insert exception for stock restoration failure:", auditErr);
-        }
-      }
-      throw new Error(orderErr?.message || "Failed to create order record.");
-    }
-
-    // Step C: Insert Order Items (Triggers generate OI-XXXXX-YYY and snapshot SKU)
-    const orderItemsToInsert = validatedItems.map((vi: Record<string, unknown>) => ({
-      ...vi,
-      order_id: orderData.id,
-    }));
-
-    const { error: itemsErr } = await supabase.from("order_items").insert(orderItemsToInsert);
-    if (itemsErr) {
-      await supabase.from("orders").delete().eq("id", orderData.id);
-      const restorationResults: RestoreStockResult[] = [];
-      for (const dec of decrementedItems) {
-        restorationResults.push(await restoreStock(supabase, dec.productId, dec.quantity));
-      }
-      const failedRestorations = restorationResults.filter((r) => !r.success);
-      if (failedRestorations.length > 0) {
-        try {
-          await supabase.from("finance_audit_logs").insert({
-            action_type: "STOCK_RESTORATION_FAILED",
-            target_entity: "inventory",
-            target_id: null,
-            notes: `Stock restoration failed after order items insertion error: ${itemsErr.message}`,
-            new_values: {
-              order_id: orderData.id,
-              failure_count: failedRestorations.length,
-              failed_items: failedRestorations.map((f) => ({
-                product_id: f.productId,
-                quantity: f.quantity,
-                error: f.error || "Unknown error",
-              })),
-            },
-          });
-        } catch (auditErr) {
-          console.error("Notice: finance_audit_logs insert exception for stock restoration failure:", auditErr);
-        }
-      }
-      throw new Error(itemsErr.message || "Failed to create order items.");
-    }
-
-    // Step D: Increment Coupon Usage Counter if coupon was applied
-    if (validatedCouponCode) {
-      const { data: cData } = await supabase
-        .from("coupons")
-        .select("id, times_used, usage_count")
-        .eq("code", validatedCouponCode)
-        .single();
-
-      if (cData) {
-        const nextUsed = (cData.times_used ?? cData.usage_count ?? 0) + 1;
-        await supabase
-          .from("coupons")
-          .update({ times_used: nextUsed, usage_count: nextUsed })
-          .eq("id", cData.id);
-      }
-    }
-
-    // Persist replacement attribution and wallet metadata safely in fallback
-    const extraFallbackUpdates: Record<string, unknown> = {};
-    if (params.isReplacement) {
-      extraFallbackUpdates.is_replacement = true;
-      if (params.originalOrderId) extraFallbackUpdates.original_order_id = params.originalOrderId;
-      if (params.replacementRequestId) extraFallbackUpdates.replacement_request_id = params.replacementRequestId;
-      if (params.replacementDifference !== undefined) extraFallbackUpdates.replacement_difference = params.replacementDifference;
-      if (params.replacementOriginalValue !== undefined) extraFallbackUpdates.replacement_original_value = params.replacementOriginalValue;
-    }
-    if (appliedWallet > 0) {
-      extraFallbackUpdates.wallet_amount_applied = appliedWallet;
-    }
-    if (Object.keys(extraFallbackUpdates).length > 0 && orderData.id) {
-      try {
-        const { error: updErr } = await supabase.from("orders").update(extraFallbackUpdates).eq("id", orderData.id);
-        if (updErr) {
-          console.warn("Notice: optional extra order columns fallback update notice:", updErr.message);
-        }
-      } catch (errCatch) {
-        console.warn("Notice: optional extra order columns fallback update exception:", errCatch);
-      }
-    }
-
-    if (appliedWallet > 0 && userId) {
-      await debitCustomerWallet(supabase, {
-        customerId: userId,
-        amount: appliedWallet,
-        referenceType: "order",
-        referenceId: orderData.id,
-        description: `Wallet funds applied to Order #${orderData.order_number}`,
-        idempotencyKey: `WALLET_CHECKOUT_${cleanIdempotencyKey || orderData.id}`,
-      });
-    }
-
-    if (userId && shippingAddress) {
-      await autoSaveFirstOrderAddress(supabase, userId, shippingAddress);
-    }
-
-    return {
-      success: true,
-      order: orderData,
-      order_number: orderData.order_number,
-      invoice_number: orderData.invoice_number,
-      is_duplicate: false,
-      status: 200,
-    };
-  } catch (flowErr: unknown) {
-    const restorationResults: RestoreStockResult[] = [];
-    for (const dec of decrementedItems) {
-      restorationResults.push(await restoreStock(supabase, dec.productId, dec.quantity));
-    }
-    const failedRestorations = restorationResults.filter((r) => !r.success);
-    if (failedRestorations.length > 0) {
-      try {
-        await supabase.from("finance_audit_logs").insert({
-          action_type: "STOCK_RESTORATION_FAILED",
-          target_entity: "inventory",
-          target_id: null,
-          notes: `Stock restoration failed during fallback flow exception: ${flowErr instanceof Error ? flowErr.message : String(flowErr)}`,
-          new_values: {
-            failure_count: failedRestorations.length,
-            failed_items: failedRestorations.map((f) => ({
-              product_id: f.productId,
-              quantity: f.quantity,
-              error: f.error || "Unknown error",
-            })),
-          },
-        });
-      } catch (auditErr) {
-        console.error("Notice: finance_audit_logs insert exception:", auditErr);
-      }
-    }
-    throw flowErr;
   }
+
+  // 8c. Unrecoverable RPC failure: fail closed with retryable 503 service error.
+  // Never create orders manually and never manually decrement parent/variant stock outside PostgreSQL.
+  console.error("Critical: create_order_atomic RPC failed; failing closed without manual fallback:", rpcErr);
+  try {
+    await supabase.from("finance_audit_logs").insert({
+      action_type: "ORDER_CREATION_FAILED",
+      target_entity: "orders",
+      target_id: null,
+      notes: `Atomic order creation RPC failed: ${rpcErr?.message || "Unknown RPC error"}. Failed closed without fallback.`,
+      new_values: {
+        idempotency_key: cleanIdempotencyKey,
+        error: rpcErr?.message || String(rpcErr),
+        code: rpcErr?.code,
+      },
+    });
+  } catch (auditErr) {
+    console.error("Notice: finance_audit_logs insert exception for RPC failure:", auditErr);
+  }
+
+  return {
+    success: false,
+    message: "Order creation is temporarily unavailable. Please retry in a few moments.",
+    status: 503,
+  };
 }

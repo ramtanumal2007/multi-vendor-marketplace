@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient, createSupabaseAdminClient } from "@/lib/supabase";
-import { getOrCreateCustomerWallet, getCustomerWalletTransactions } from "@/lib/wallet-service";
+import { getSellerFinancialSummary, getSellerLedgerEntries } from "@/lib/settlement-service";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ function getSupabaseAdmin() {
 
 /**
  * GET /api/seller/wallet
- * Returns current authenticated seller's wallet balance and ledger transaction log.
+ * Returns current authenticated seller's balance and ledger transaction log from authoritative seller financial tables.
  * Enforces seller role authorization and session ownership.
  */
 export async function GET() {
@@ -70,15 +70,25 @@ export async function GET() {
       }
     }
 
-    // Reuse existing wallet ledger services for user.id
-    const wallet = await getOrCreateCustomerWallet(supabaseAdmin, user.id);
-    const transactions = await getCustomerWalletTransactions(supabaseAdmin, user.id);
+    // Authoritative Seller Financial Summary & Ledger
+    const [summary, entries] = await Promise.all([
+      getSellerFinancialSummary(supabaseAdmin, user.id),
+      getSellerLedgerEntries(supabaseAdmin, user.id, 50),
+    ]);
 
     return NextResponse.json({
       success: true,
       businessName: sellerProfile?.business_name || "Merchant Store",
-      wallet,
-      transactions,
+      summary,
+      transactions: entries,
+      wallet: {
+        balance: summary.available_to_withdraw,
+        pending_balance: summary.pending_settlement,
+        locked_balance: summary.reserved_for_payout,
+        lifetime_earned: summary.gross_product_sales,
+        lifetime_withdrawn: summary.total_paid_to_seller,
+        currency: "INR",
+      },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal server error.";

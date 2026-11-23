@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
@@ -161,6 +161,10 @@ export default function SellerPayoutHubClient({
   const [requestError, setRequestError] = useState<string | null>(null);
   const [requestSuccess, setRequestSuccess] = useState<string | null>(null);
 
+  // Prevent concurrent payout submissions and preserve retry identity.
+  const payoutSubmitLockRef = useRef(false);
+  const payoutIdempotencyRef = useRef<Map<string, string>>(new Map());
+
   // View Receipt Modal State
   const [selectedPayoutForReceipt, setSelectedPayoutForReceipt] = useState<PayoutRequestItem | null>(null);
 
@@ -287,35 +291,100 @@ export default function SellerPayoutHubClient({
     fetchLedger();
   }, [fetchOverview, fetchPayouts, fetchEarnings, fetchLedger]);
 
-  // Submit Payout Request Handler
+  // Submit Payout   // Submit Payout Request Handler
   const handlePayoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Synchronous lock prevents concurrent submissions.
+    if (payoutSubmitLockRef.current) return;
+    payoutSubmitLockRef.current = true;
+
     setRequestError(null);
     setRequestSuccess(null);
 
-    const amountNum = parseFloat(requestAmount);
-    if (isNaN(amountNum) || amountNum < 10) {
-      setRequestError("Minimum payout withdrawal is ₹10.00.");
-      return;
-    }
-
-    if (!summary || amountNum > summary.available_to_withdraw) {
-      setRequestError(
-        `Amount cannot exceed your current available balance of ${formatCurrency(
-          summary?.available_to_withdraw || 0
-        )}.`
-      );
-      return;
-    }
-
-    const selectedDestObj = destinations.find((d) => d.id === selectedDestination);
-    if (!selectedDestObj) {
-      setRequestError("Please select a verified payout destination.");
-      return;
-    }
+    let fingerprint: string | null = null;
 
     try {
+      const amountNum = Number(requestAmount);
+
+      if (!Number.isFinite(amountNum) || amountNum < 10) {
+        setRequestError("Minimum payout request amount is ₹10.00.");
+        return;
+      }
+
+
+      const selectedDestObj = destinations.find(
+        (d) => d.id === selectedDestination
+      );
+
+      if (!selectedDestObj) {
+        setRequestError("Please select a verified payout destination.");
+        return;
+      }
+
+      // Reuse the same key for retries of identical payout details.
+      fingerprint = JSON.stringify({
+        sellerId,
+        amount: Number(amountNum.toFixed(2)),
+        destinationId: selectedDestObj.id,
+        destinationType: selectedDestObj.type,
+        bankAccountId: selectedDestObj.bankAccountId || null,
+        upiId: selectedDestObj.upiId || null,
+      });
+
+      const storageKey = `vsm_payout_idempotency_${sellerId}`;
+      const persistedKeys: Record<string, string> = {};
+
+      try {
+        const raw = window.sessionStorage.getItem(storageKey);
+        if (raw) {
+          const parsed: unknown = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            for (const [key, value] of Object.entries(parsed)) {
+              if (typeof value === "string") {
+                persistedKeys[key] = value;
+              }
+            }
+          }
+        }
+      } catch {
+        // Continue with in-memory protection if session storage is unavailable.
+      }
+
+      let idempotencyKey =
+        payoutIdempotencyRef.current.get(fingerprint) ||
+        persistedKeys[fingerprint];
+
+      // Existing keys are retries; new requests must pass balance validation.
+      const isRetry = Boolean(idempotencyKey);
+
+      if (
+        !isRetry &&
+        (!summary || amountNum > summary.available_to_withdraw)
+      ) {
+        setRequestError(
+          `Amount cannot exceed your current available balance of ${formatCurrency(
+            summary?.available_to_withdraw || 0
+          )}.`
+        );
+        return;
+      }
+
+      if (!idempotencyKey) {
+        idempotencyKey = `REQ_${sellerId}_${globalThis.crypto.randomUUID()}`;
+      }
+
+      payoutIdempotencyRef.current.set(fingerprint, idempotencyKey);
+      persistedKeys[fingerprint] = idempotencyKey;
+
+      try {
+        window.sessionStorage.setItem(storageKey, JSON.stringify(persistedKeys));
+      } catch {
+        // In-memory retry protection remains available.
+      }
+
       setIsSubmittingPayout(true);
+
       const res = await fetch("/api/seller/payouts/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -323,13 +392,14 @@ export default function SellerPayoutHubClient({
           amount: amountNum,
           destinationType: selectedDestObj.type,
           bankAccountId: selectedDestObj.bankAccountId || null,
-          idempotencyKey: `REQ_${sellerId}_${Date.now()}`,
+          idempotencyKey,
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || "Failed to submit payout request.");
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || "Failed to submit payout request.");
       }
 
       setRequestSuccess(
@@ -338,8 +408,34 @@ export default function SellerPayoutHubClient({
         )} submitted successfully! Your funds are reserved and awaiting Admin review.`
       );
 
-      // Refresh balances and queue
+      // Keep the key briefly so an immediate repeated submit is idempotent.
       setTimeout(() => {
+        if (fingerprint) {
+          payoutIdempotencyRef.current.delete(fingerprint);
+
+          try {
+            const storageKey = `vsm_payout_idempotency_${sellerId}`;
+            const raw = window.sessionStorage.getItem(storageKey);
+
+            if (raw) {
+              const parsed: unknown = JSON.parse(raw);
+
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                const storedKeys = parsed as Record<string, unknown>;
+                delete storedKeys[fingerprint];
+
+                if (Object.keys(storedKeys).length === 0) {
+                  window.sessionStorage.removeItem(storageKey);
+                } else {
+                  window.sessionStorage.setItem(storageKey, JSON.stringify(storedKeys));
+                }
+              }
+            }
+          } catch {
+            // Do not interrupt successful payout handling if storage cleanup fails.
+          }
+        }
+
         setIsRequestModalOpen(false);
         setRequestAmount("");
         fetchOverview();
@@ -347,13 +443,19 @@ export default function SellerPayoutHubClient({
         fetchLedger();
       }, 1800);
     } catch (err) {
-      setRequestError(err instanceof Error ? err.message : "Error processing payout request.");
+      // Keep the key after failure so retry uses the same request identity.
+      setRequestError(
+        err instanceof Error
+          ? err.message
+          : "Error processing payout request."
+      );
     } finally {
       setIsSubmittingPayout(false);
+      payoutSubmitLockRef.current = false;
     }
   };
 
-  const statusBadge = (status: string) => {
+   const statusBadge = (status: string) => {
     switch (status) {
       case "paid":
         return (
@@ -525,7 +627,7 @@ export default function SellerPayoutHubClient({
 
             {/* Top Row: Available for Payout (Featured Hero) & On Hold */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {/* CARD 1: Available for Payout — "Money ready to request." */}
+              {/* CARD 1: Available for Payout â€” "Money ready to request." */}
               <div className="lg:col-span-2 p-5 sm:p-6 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white shadow-lg relative overflow-hidden border border-slate-700 flex flex-col justify-between">
                 <div className="space-y-2.5 relative z-10">
                   <div className="flex items-center justify-between">
@@ -539,7 +641,7 @@ export default function SellerPayoutHubClient({
                       </p>
                     </div>
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                      Min Payout: ₹10
+                      Min Payout: â‚¹10
                     </span>
                   </div>
 
@@ -567,7 +669,7 @@ export default function SellerPayoutHubClient({
                 </div>
               </div>
 
-              {/* CARD 2: On Hold — "Money that is not eligible yet." */}
+              {/* CARD 2: On Hold â€” "Money that is not eligible yet." */}
               <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-xs flex flex-col justify-between space-y-3">
                 <div>
                   <div className="flex items-center justify-between">
@@ -602,7 +704,7 @@ export default function SellerPayoutHubClient({
 
             {/* Grid of Remaining 5 Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5 sm:gap-4">
-              {/* CARD 3: Reserved for Payout — "Money already reserved for a pending request." */}
+              {/* CARD 3: Reserved for Payout â€” "Money already reserved for a pending request." */}
               <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col justify-between space-y-2">
                 <div>
                   <div className="flex items-center gap-1.5 text-xs font-bold text-purple-700">
@@ -623,7 +725,7 @@ export default function SellerPayoutHubClient({
                 </div>
               </div>
 
-              {/* CARD 4: Payout Requests — "Check the status of your requests." */}
+              {/* CARD 4: Payout Requests â€” "Check the status of your requests." */}
               <div
                 onClick={() => setActiveTab("PAYOUTS")}
                 className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col justify-between space-y-2 hover:border-blue-300 hover:shadow-sm cursor-pointer transition-all group"
@@ -650,7 +752,7 @@ export default function SellerPayoutHubClient({
                 </div>
               </div>
 
-              {/* CARD 5: Payout History & Receipts — "View completed transfers and receipts." */}
+              {/* CARD 5: Payout History & Receipts â€” "View completed transfers and receipts." */}
               <div
                 onClick={() => setActiveTab("PAYOUTS")}
                 className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col justify-between space-y-2 hover:border-emerald-300 hover:shadow-sm cursor-pointer transition-all group"
@@ -677,7 +779,7 @@ export default function SellerPayoutHubClient({
                 </div>
               </div>
 
-              {/* CARD 6: Earnings & Sales — "Sales and earnings breakdown." */}
+              {/* CARD 6: Earnings & Sales â€” "Sales and earnings breakdown." */}
               <div
                 onClick={() => setActiveTab("EARNINGS")}
                 className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col justify-between space-y-2 hover:border-indigo-300 hover:shadow-sm cursor-pointer transition-all group"
@@ -704,7 +806,7 @@ export default function SellerPayoutHubClient({
                 </div>
               </div>
 
-              {/* CARD 7: COD Awaiting Remittance — "Courier payment not yet confirmed." */}
+              {/* CARD 7: COD Awaiting Remittance â€” "Courier payment not yet confirmed." */}
               <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col justify-between space-y-2">
                 <div>
                   <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700">
@@ -1122,7 +1224,7 @@ export default function SellerPayoutHubClient({
                 ) : (
                   <div>
                     <div className="sm:hidden px-3.5 py-2 bg-slate-50 border-b border-slate-100 text-[11px] text-slate-500 font-medium flex items-center justify-between">
-                      <span>↔ Scroll sideways to view all sales economics</span>
+                      <span>â†” Scroll sideways to view all sales economics</span>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs min-w-[850px]">
@@ -1241,7 +1343,7 @@ export default function SellerPayoutHubClient({
                                 <span>{formatExactDateTime(entry.created_at)}</span>
                                 {entry.idempotency_key && (
                                   <>
-                                    <span>•</span>
+                                    <span>â€¢</span>
                                     <span>Key: {entry.idempotency_key}</span>
                                   </>
                                 )}
@@ -1341,11 +1443,11 @@ export default function SellerPayoutHubClient({
               {/* Amount Input */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>Withdrawal Amount (₹)</span>
-                  <span className="text-[11px] font-normal text-slate-500">Min ₹10.00</span>
+                  <span>Withdrawal Amount (â‚¹)</span>
+                  <span className="text-[11px] font-normal text-slate-500">Min â‚¹10.00</span>
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3.5 top-2.5 font-bold text-slate-400">₹</span>
+                  <span className="absolute left-3.5 top-2.5 font-bold text-slate-400">â‚¹</span>
                   <input
                     type="number"
                     step="0.01"
@@ -1594,3 +1696,10 @@ export default function SellerPayoutHubClient({
     </div>
   );
 }
+
+
+
+
+
+
+

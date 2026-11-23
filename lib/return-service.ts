@@ -3,7 +3,101 @@ import crypto from "crypto";
 import { evaluateProductReturnPolicy } from "./return-policy";
 import { createOrderRecord } from "./order-service";
 import { creditCustomerWallet } from "./wallet-service";
-import { createCashfreeRefund } from "./cashfree";
+import { createCashfreeRefund, fetchCashfreeRefund } from "./cashfree";
+
+export interface RestoreCancelledOrderStockItemError {
+  itemId: string;
+  productId: string | null;
+  error: string;
+}
+
+export interface RestoreCancelledOrderStockResult {
+  success: boolean;
+  message?: string;
+  restoredCount: number;
+  failedCount: number;
+  errors: RestoreCancelledOrderStockItemError[];
+}
+
+/**
+ * Idempotently restore inventory for a cancelled order. The database RPC records
+ * one restoration per order item and increments stock in the same transaction.
+ * Historical items without a checkout inventory snapshot are deliberately sent
+ * to manual review rather than guessing from the product's current settings.
+ *
+ * Runs sequentially (for...of with await) to avoid lock contention on shared
+ * parent products. Does not abort on single-item failure so subsequent items
+ * can still be restored. Collects all item failures and returns structured status.
+ */
+async function restoreCancelledOrderStock(
+  supabaseAdmin: SupabaseClient,
+  orderId: string
+): Promise<RestoreCancelledOrderStockResult> {
+  const { data: items, error: itemsError } = await supabaseAdmin
+    .from("order_items")
+    .select("id, product_id, quantity, inventory_tracked_at_checkout")
+    .eq("order_id", orderId);
+
+  if (itemsError) {
+    return {
+      success: false,
+      message: `Could not load order items for stock restoration: ${itemsError.message}`,
+      restoredCount: 0,
+      failedCount: 0,
+      errors: [],
+    };
+  }
+
+  const errors: RestoreCancelledOrderStockItemError[] = [];
+  let restoredCount = 0;
+
+  for (const item of items || []) {
+    if (!item.product_id) continue; // Custom items have no catalog stock.
+    const { data, error } = await supabaseAdmin.rpc("restore_cancelled_order_item_stock", {
+      p_order_item_id: item.id,
+    });
+
+    if (error) {
+      errors.push({
+        itemId: item.id,
+        productId: item.product_id || null,
+        error: error.message || "RPC execution failed",
+      });
+      continue;
+    }
+    if (!data || data.success !== true) {
+      errors.push({
+        itemId: item.id,
+        productId: item.product_id || null,
+        error: data?.code || "UNKNOWN_RESULT",
+      });
+      continue;
+    }
+
+    restoredCount++;
+  }
+
+  if (errors.length > 0) {
+    const errDetails = errors
+      .map((e) => `item ${e.itemId} (${e.error})`)
+      .join("; ");
+    return {
+      success: false,
+      message: `Stock restoration partially failed: ${errors.length} of ${(items || []).length} item(s) failed. ${errDetails}`,
+      restoredCount,
+      failedCount: errors.length,
+      errors,
+    };
+  }
+
+  return {
+    success: true,
+    message: "All order items processed successfully.",
+    restoredCount,
+    failedCount: 0,
+    errors: [],
+  };
+}
 
 export type ReturnStatus =
   | "RETURN_REQUESTED"
@@ -877,6 +971,128 @@ export async function confirmProductReceivedBySeller(
 }
 
 /**
+ * A deterministic refund reference shared by cancellation persistence and Cashfree.
+ * Keep this identical across retries so a webhook can be linked before/after the
+ * gateway response is received.
+ */
+function getCustomerCancellationRefundId(orderId: string): string {
+  return `ref_canc_${orderId.replace(/[^a-zA-Z0-9_-]/g, "_")}`.slice(0, 50);
+}
+
+/**
+ * Persist the order-level cancellation row before submitting a gateway refund.
+ * The table intentionally permits multiple rows per order for item-level returns;
+ * therefore this helper targets the latest order-level row (order_item_id IS NULL).
+ * After submission, the atomic webhook RPC owns gateway status metadata updates.
+ *
+ * This is retry-safe for sequential retries. Concurrent cancellation requests
+ * still require database-side serialization/uniqueness and are not claimed atomic.
+ */
+async function ensureCustomerCancellationRecord(
+  supabaseAdmin: SupabaseClient,
+  params: {
+    orderId: string;
+    customerId: string;
+    reasonCode: string;
+    reasonText?: string;
+    cancelledAt: string;
+    metadata: Record<string, unknown>;
+  }
+): Promise<{ id: string; metadata: Record<string, unknown> }> {
+  const { data: existing, error: lookupError } = await supabaseAdmin
+    .from("order_cancellations")
+    .select("id, metadata")
+    .eq("order_id", params.orderId)
+    .is("order_item_id", null)
+    .order("cancelled_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lookupError) {
+    throw new Error(`Could not inspect existing cancellation record: ${lookupError.message}`);
+  }
+
+  const previousMetadata =
+    existing?.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata)
+      ? existing.metadata as Record<string, unknown>
+      : {};
+  const nextMetadata = { ...previousMetadata, ...params.metadata };
+
+  // A retry must never downgrade webhook-confirmed SUCCESS/FAILED metadata back
+  // to the initial PENDING marker or replace a richer gateway response with only
+  // the deterministic refund_id placeholder.
+  if (existing?.id && previousMetadata.gateway_refund_status) {
+    nextMetadata.gateway_refund_status = previousMetadata.gateway_refund_status;
+  }
+  if (
+    existing?.id &&
+    previousMetadata.gateway_refund_response &&
+    typeof previousMetadata.gateway_refund_response === "object"
+  ) {
+    nextMetadata.gateway_refund_response = previousMetadata.gateway_refund_response;
+  }
+
+  if (existing?.id) {
+    const { data, error } = await supabaseAdmin
+      .from("order_cancellations")
+      .update({
+        reason_code: params.reasonCode,
+        reason_text: params.reasonText?.trim() || null,
+        metadata: nextMetadata,
+      })
+      .eq("id", existing.id)
+      .select("id, metadata")
+      .single();
+
+    if (error || !data) {
+      throw new Error(`Could not update cancellation record: ${error?.message || "No row returned"}`);
+    }
+    return { id: data.id, metadata: data.metadata || nextMetadata };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("order_cancellations")
+    .insert({
+      order_id: params.orderId,
+      customer_id: params.customerId,
+      reason_code: params.reasonCode,
+      reason_text: params.reasonText?.trim() || null,
+      metadata: nextMetadata,
+      cancelled_at: params.cancelledAt,
+    })
+    .select("id, metadata")
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Could not create cancellation record: ${error?.message || "No row returned"}`);
+  }
+  return { id: data.id, metadata: data.metadata || nextMetadata };
+}
+
+/**
+ * Resolve a customer-cancellation refund using one stable refund ID per order.
+ * A read-before-create prevents a retry after a lost HTTP response from issuing
+ * another refund. Cashfree's idempotency header is also stable for this refund.
+ * Unknown lookup outcomes fail closed: never POST a new refund when status is unknown.
+ */
+async function ensureCustomerCancellationCashfreeRefund(params: {
+  orderId: string;
+  orderNumber: string | number;
+  amount: number;
+}) {
+  const refundId = getCustomerCancellationRefundId(params.orderId);
+  const existing = await fetchCashfreeRefund({ orderId: params.orderId, refundId });
+  if (existing) return existing;
+
+  return createCashfreeRefund({
+    orderId: params.orderId,
+    refundAmount: params.amount,
+    refundId,
+    refundNote: `Cancellation refund for order #${params.orderNumber}`,
+  });
+}
+
+/**
  * Customer cancellation flow:
  * Enforces cancellation window (before SHIPPED/IN TRANSIT), restores product stock atomically,
  * and records cancellation audit entry.
@@ -911,7 +1127,99 @@ export async function cancelCustomerOrderServer(
   const fulfillment = (order.fulfillment_status || "").toLowerCase();
 
   if (internal === "CANCELLED" || fulfillment === "cancelled") {
-    return { success: false, message: "Order is already cancelled.", status: 400 };
+    // Retry stock restoration first; its per-item ledger makes this safe.
+    const stockRetry = await restoreCancelledOrderStock(supabaseAdmin, orderId);
+    if (!stockRetry.success) {
+      return {
+        success: false,
+        message: `Order is already cancelled, but stock restoration needs attention: ${stockRetry.message}`,
+        status: 500,
+      };
+    }
+
+    // Ensure seller settlements and balances are adjusted atomically and idempotently
+    try {
+      await supabaseAdmin.rpc("adjust_seller_settlement_for_cancellation_atomic", {
+        p_order_id: orderId,
+        p_reason: reasonText?.trim() || `Customer cancellation retry (${reasonCode})`,
+      });
+    } catch (settleRetryErr) {
+      console.warn("Notice: Seller settlement cancellation adjustment retry:", settleRetryErr);
+    }
+
+    const alreadyPaidOnline =
+      ((order.payment_method || "").toUpperCase() === "ONLINE" ||
+       (order.payment_method || "").toLowerCase() === "cashfree") &&
+      ["paid", "refunded"].includes((order.payment_status || "").toLowerCase());
+    const retryGatewayAmount = alreadyPaidOnline
+      ? Math.max(0, Number((Number(order.total || 0) - Number(order.wallet_amount_applied || 0)).toFixed(2)))
+      : 0;
+
+    if (alreadyPaidOnline && retryGatewayAmount > 0 && order.payment_status !== "refunded") {
+      const retryRefundId = getCustomerCancellationRefundId(order.id);
+      let retryCancellationRecord: { id: string; metadata: Record<string, unknown> };
+      try {
+        retryCancellationRecord = await ensureCustomerCancellationRecord(supabaseAdmin, {
+          orderId: order.id,
+          customerId,
+          reasonCode,
+          reasonText,
+          cancelledAt: new Date().toISOString(),
+          metadata: {
+            gateway_refund_amount: retryGatewayAmount,
+            gateway_refund_status: "PENDING",
+            gateway_refund_response: { refund_id: retryRefundId },
+          },
+        });
+      } catch (recordError: any) {
+        return {
+          success: false,
+          message: `Order is cancelled and stock is restored, but its durable refund record could not be verified. Retry later. ${recordError?.message || ""}`.trim(),
+          status: 503,
+        };
+      }
+
+      try {
+        const refund = await ensureCustomerCancellationCashfreeRefund({
+          orderId: order.id,
+          orderNumber: order.order_number,
+          amount: retryGatewayAmount,
+        });
+        if (refund.status === "SUCCESS") {
+          const { error: statusError } = await supabaseAdmin
+            .from("orders")
+            .update({ payment_status: "refunded", updated_at: new Date().toISOString() })
+            .eq("id", orderId)
+            .eq("payment_status", "paid");
+          if (statusError) {
+            return { success: false, message: `Cashfree refund succeeded, but order status reconciliation needs attention: ${statusError.message}`, status: 500 };
+          }
+        } else if (refund.status === "FAILED" || refund.status === "CANCELLED") {
+          return {
+            success: false,
+            message: `Order is cancelled and stock is restored, but Cashfree reports refund status ${refund.status}. Manual refund review is required; no new refund was created.`,
+            status: 409,
+          };
+        }
+        return {
+          success: true,
+          message: refund.status === "SUCCESS"
+            ? "Order is cancelled, stock is restored, and Cashfree refund is confirmed."
+            : "Order is cancelled and stock is restored. Cashfree refund is still pending.",
+          orderNumber: order.order_number,
+          gatewayRefundAmount: retryGatewayAmount,
+          paymentStatus: refund.status === "SUCCESS" ? "refunded" : order.payment_status,
+        };
+      } catch (refundRetryError: any) {
+        return {
+          success: false,
+          message: `Order is cancelled and stock is restored, but Cashfree refund status could not be verified. Retry later; no second refund was submitted. ${refundRetryError?.message || ""}`.trim(),
+          status: 503,
+        };
+      }
+    }
+
+    return { success: false, message: "Order is already cancelled. Stock restoration is verified.", status: 400 };
   }
 
   if (
@@ -928,12 +1236,6 @@ export async function cancelCustomerOrderServer(
       status: 400,
     };
   }
-
-  // 2. Fetch Order Items to restore inventory
-  const { data: items } = await supabaseAdmin
-    .from("order_items")
-    .select("id, product_id, quantity, title")
-    .eq("order_id", orderId);
 
   // 3. Process Wallet Refund (idempotent atomic wallet credit)
   const walletAmountApplied = Math.max(0, Number(order.wallet_amount_applied || 0));
@@ -972,26 +1274,69 @@ export async function cancelCustomerOrderServer(
 
   let cashfreeRefundResult: any = null;
   let targetPaymentStatus = order.payment_status;
+  const cancellationRefundId = isPaidOnline && gatewayRefundAmount > 0
+    ? getCustomerCancellationRefundId(order.id)
+    : null;
+
+  // The durable cancellation/refund reference must exist before Cashfree can
+  // emit a webhook. If persistence fails, do not submit a gateway refund.
+  let cancellationRecord: { id: string; metadata: Record<string, unknown> };
+  try {
+    cancellationRecord = await ensureCustomerCancellationRecord(supabaseAdmin, {
+      orderId,
+      customerId,
+      reasonCode,
+      reasonText,
+      cancelledAt: new Date().toISOString(),
+      metadata: {
+        wallet_amount_applied: walletAmountApplied,
+        wallet_refund_status: walletAmountApplied > 0
+          ? (walletRefundResult?.success ? "COMPLETED" : "FAILED")
+          : "NOT_APPLICABLE",
+        wallet_transaction_id: walletRefundResult?.transactionId || null,
+        gateway_refund_amount: gatewayRefundAmount,
+        gateway_refund_status: cancellationRefundId ? "PENDING" : "NOT_APPLICABLE",
+        ...(cancellationRefundId
+          ? { gateway_refund_response: { refund_id: cancellationRefundId } }
+          : {}),
+      },
+    });
+  } catch (recordError: any) {
+    console.error(`Could not persist cancellation record before refund for order ${orderId}:`, recordError);
+    return {
+      success: false,
+      message: `Cancellation could not safely continue because its durable record could not be saved. Retry later. ${recordError?.message || ""}`.trim(),
+      status: 503,
+    };
+  }
 
   if (isPaidOnline && gatewayRefundAmount > 0) {
     // Durable refund-pending status until gateway confirms
     targetPaymentStatus = "refund_pending";
     try {
-      cashfreeRefundResult = await createCashfreeRefund({
+      cashfreeRefundResult = await ensureCustomerCancellationCashfreeRefund({
         orderId: order.id,
-        refundAmount: gatewayRefundAmount,
-        refundId: `ref_canc_${order.id.slice(0, 18)}_${Date.now()}`.replace(/[^a-zA-Z0-9_-]/g, ""),
-        refundNote: `Cancellation refund for order #${order.order_number}`,
+        orderNumber: order.order_number,
+        amount: gatewayRefundAmount,
       });
       if (cashfreeRefundResult?.status === "SUCCESS") {
         targetPaymentStatus = "refunded";
       } else {
         targetPaymentStatus = "paid";
       }
+      // The webhook's atomic reconciliation owns gateway status metadata after
+      // submission. Do not overwrite it here: a fast webhook may already have
+      // committed SUCCESS while this request is still returning from Cashfree.
     } catch (cfErr: any) {
       console.warn("Cashfree refund initiation warning:", cfErr?.message || cfErr);
-      cashfreeRefundResult = { success: false, error: cfErr?.message || "Gateway refund initiation error" };
+      cashfreeRefundResult = {
+        refund_id: cancellationRefundId,
+        success: false,
+        error: cfErr?.message || "Gateway refund initiation/status lookup error",
+      };
       targetPaymentStatus = "paid";
+      // Keep the pre-submission PENDING marker and deterministic refund_id. A
+      // retry performs a Cashfree status lookup before it can submit anything.
     }
   } else if (walletAmountApplied > 0 && !isPaidOnline) {
     targetPaymentStatus = "refunded";
@@ -1018,35 +1363,27 @@ export async function cancelCustomerOrderServer(
     return { success: false, message: "Failed to update order status.", status: 500 };
   }
 
-  // 6. Restore Stock for each product (atomic stock increment)
-  if (items && items.length > 0) {
-    for (const it of items) {
-      if (it.product_id && it.quantity > 0) {
-        try {
-          await supabaseAdmin.rpc("restore_product_stock_atomic", {
-            p_product_id: it.product_id,
-            p_quantity: it.quantity,
-          });
-        } catch {
-          // Fallback manual increment
-          try {
-            const { data: pData } = await supabaseAdmin
-              .from("products")
-              .select("stock_quantity")
-              .eq("id", it.product_id)
-              .single();
-            if (pData) {
-              await supabaseAdmin
-                .from("products")
-                .update({ stock_quantity: (pData.stock_quantity || 0) + it.quantity })
-                .eq("id", it.product_id);
-            }
-          } catch (restoreErr) {
-            console.error("Non-fatal stock restoration error:", restoreErr);
-          }
-        }
-      }
-    }
+  // 6. Restore stock through an idempotent per-order-item database ledger.
+  // If restoration fails, keep the order cancelled and return an explicit error;
+  // a retry enters the already-cancelled branch above without repeating refunds.
+  const stockRestore = await restoreCancelledOrderStock(supabaseAdmin, orderId);
+  if (!stockRestore.success) {
+    console.error(`Stock restoration requires attention for order ${orderId}:`, stockRestore.message);
+    return {
+      success: false,
+      message: `Order was cancelled, but stock restoration requires attention: ${stockRestore.message}`,
+      status: 500,
+    };
+  }
+
+  // 6b. Adjust seller settlements atomically (e.g. reverse released earnings or cancel pending/on-hold settlements)
+  try {
+    await supabaseAdmin.rpc("adjust_seller_settlement_for_cancellation_atomic", {
+      p_order_id: orderId,
+      p_reason: reasonText?.trim() || `Customer cancellation (${reasonCode})`,
+    });
+  } catch (settleCancelErr) {
+    console.warn("Seller settlement cancellation adjustment notice:", settleCancelErr);
   }
 
   // 7. Add order_timeline event
@@ -1068,26 +1405,8 @@ export async function cancelCustomerOrderServer(
     console.warn("Timeline insert warning:", tlErr);
   }
 
-  // 8. Record order_cancellations record with durable metadata
-  try {
-    await supabaseAdmin.from("order_cancellations").insert({
-      order_id: orderId,
-      customer_id: customerId,
-      reason_code: reasonCode,
-      reason_text: reasonText?.trim() || null,
-      metadata: {
-        wallet_amount_applied: walletAmountApplied,
-        wallet_refund_status: walletAmountApplied > 0 ? (walletRefundResult?.success ? "COMPLETED" : "FAILED") : "NOT_APPLICABLE",
-        wallet_transaction_id: walletRefundResult?.transactionId || null,
-        gateway_refund_amount: gatewayRefundAmount,
-        gateway_refund_status: isPaidOnline ? (targetPaymentStatus === "refunded" ? "SUCCESS" : "PENDING") : "NOT_APPLICABLE",
-        gateway_refund_response: cashfreeRefundResult,
-      },
-      cancelled_at: nowIso,
-    });
-  } catch (cancErr) {
-    console.warn("Cancellation log warning:", cancErr);
-  }
+  // 8. order_cancellations was persisted before any gateway refund request and
+  // its gateway metadata was updated after the gateway response was resolved.
 
   return {
     success: true,
@@ -1655,106 +1974,23 @@ export async function processAdminReturnRefund(
 
       // Proportional seller deduction based on net payable (accounting for commission/discounts)
       const sellerDeductionPaise = Math.round(Number(settlement.net_seller_payable_paise || 0) * returnRatio);
-      const isAlreadyReleased = settlement.settlement_status === "eligible_released";
 
-      if (isAlreadyReleased) {
-        // Seller was already paid out or credited to available balance: Debit seller balance
-        const { data: sellerBal } = await supabaseAdmin
-          .from("seller_balances")
-          .select("available_balance, lifetime_earned")
-          .eq("seller_id", settlement.seller_id)
-          .maybeSingle();
+      // Atomically debit seller balance (if released) or adjust held settlement with row locking & idempotency
+      const { error: rpcErr } = await supabaseAdmin.rpc("debit_seller_balance_for_refund_atomic", {
+        p_return_request_id: existing.id,
+        p_order_id: existing.order_id,
+        p_order_item_id: existing.order_item_id,
+        p_seller_id: settlement.seller_id,
+        p_deduction_paise: sellerDeductionPaise,
+        p_customer_refund_paise: Math.round(finalRefundAmount * 100),
+        p_admin_id: adminUserId,
+        p_returned_qty: returnedQty,
+        p_total_qty: totalPurchasedQty,
+        p_idempotency_key: `REFUND_DEDUCTION_${existing.id}`,
+      });
 
-        const currentAvailPaise = Math.round(Number(sellerBal?.available_balance || 0) * 100);
-        const newAvailPaise = currentAvailPaise - sellerDeductionPaise;
-        const newAvailNum = Number((newAvailPaise / 100).toFixed(2));
-        const newLifetimePaise = Math.round(Number(sellerBal?.lifetime_earned || 0) * 100) - sellerDeductionPaise;
-        const newLifetimeNum = Number((newLifetimePaise / 100).toFixed(2));
-
-        await supabaseAdmin
-          .from("seller_balances")
-          .update({
-            available_balance: newAvailNum,
-            lifetime_earned: newLifetimeNum,
-            updated_at: nowIso,
-          })
-          .eq("seller_id", settlement.seller_id);
-
-        await supabaseAdmin
-          .from("seller_settlements")
-          .update({
-            settlement_status: "refunded_adjusted",
-            refunded_amount_paise: Number(settlement.refunded_amount_paise || 0) + Math.round(finalRefundAmount * 100),
-            net_seller_payable_paise: Math.max(0, Number(settlement.net_seller_payable_paise || 0) - sellerDeductionPaise),
-            updated_at: nowIso,
-          })
-          .eq("id", settlement.id);
-
-        await supabaseAdmin.from("seller_ledger_entries").insert({
-          seller_id: settlement.seller_id,
-          order_id: existing.order_id,
-          order_item_id: existing.order_item_id,
-          settlement_id: settlement.id,
-          entry_type: "REFUND_DEDUCTION",
-          direction: "debit",
-          amount_paise: sellerDeductionPaise,
-          balance_type: "available",
-          available_balance_after_paise: newAvailPaise,
-          idempotency_key: `REFUND_DEDUCTION_${existing.id}`,
-          description: `Refund deduction for return #${existing.return_number || existing.id.slice(0, 8)} (${returnedQty}/${totalPurchasedQty} units)`,
-          actor_id: adminUserId,
-          actor_type: "admin",
-          metadata: {
-            return_request_id: existing.id,
-            customer_refund_amount: finalRefundAmount,
-            seller_deduction_paise: sellerDeductionPaise,
-            returned_quantity: returnedQty,
-            total_quantity: totalPurchasedQty,
-          },
-        });
-      } else {
-        // Settlement is currently on_hold or pending_delivery: Adjust settlement and record neutral ledger entry
-        const { data: sellerBal } = await supabaseAdmin
-          .from("seller_balances")
-          .select("available_balance")
-          .eq("seller_id", settlement.seller_id)
-          .maybeSingle();
-
-        const currentAvailPaise = Math.round(Number(sellerBal?.available_balance || 0) * 100);
-
-        await supabaseAdmin
-          .from("seller_settlements")
-          .update({
-            settlement_status: "refunded_adjusted",
-            refunded_amount_paise: Number(settlement.refunded_amount_paise || 0) + Math.round(finalRefundAmount * 100),
-            net_seller_payable_paise: Math.max(0, Number(settlement.net_seller_payable_paise || 0) - sellerDeductionPaise),
-            updated_at: nowIso,
-          })
-          .eq("id", settlement.id);
-
-        await supabaseAdmin.from("seller_ledger_entries").insert({
-          seller_id: settlement.seller_id,
-          order_id: existing.order_id,
-          order_item_id: existing.order_item_id,
-          settlement_id: settlement.id,
-          entry_type: "REFUND_DEDUCTION",
-          direction: "neutral",
-          amount_paise: sellerDeductionPaise,
-          balance_type: "pending",
-          available_balance_after_paise: currentAvailPaise,
-          idempotency_key: `REFUND_DEDUCTION_${existing.id}`,
-          description: `Held settlement adjusted for return #${existing.return_number || existing.id.slice(0, 8)} (${returnedQty}/${totalPurchasedQty} units)`,
-          actor_id: adminUserId,
-          actor_type: "admin",
-          metadata: {
-            return_request_id: existing.id,
-            customer_refund_amount: finalRefundAmount,
-            seller_deduction_paise: sellerDeductionPaise,
-            previous_settlement_status: settlement.settlement_status,
-            returned_quantity: returnedQty,
-            total_quantity: totalPurchasedQty,
-          },
-        });
+      if (rpcErr) {
+        console.error("Seller settlement refund deduction RPC failed:", rpcErr);
       }
     }
   } catch (settleErr) {

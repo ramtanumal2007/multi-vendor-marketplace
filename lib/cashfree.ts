@@ -394,6 +394,12 @@ export async function createCashfreeRefund(
       "x-api-version": getCashfreeApiVersion(),
       "x-client-id": appId,
       "x-client-secret": secretKey,
+      // Cashfree expects an idempotency UUID. Derive it deterministically so
+      // retries of the same logical refund reuse the exact same key.
+      "x-idempotency-key": (() => {
+        const hex = crypto.createHash("sha256").update(`cashfree-refund:${safeRefundId}`).digest("hex");
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+      })(),
     },
     body: JSON.stringify(payload),
   });
@@ -405,4 +411,57 @@ export async function createCashfreeRefund(
   }
 
   return data as CashfreeRefundResponse;
+}
+
+/**
+ * Fetch an existing Cashfree refund before retrying its creation.
+ * Returns null only when Cashfree confirms that this refund ID does not exist.
+ * Any other API/network error is thrown so callers never create a second refund
+ * when the previous request's outcome is unknown.
+ */
+export async function fetchCashfreeRefund(params: {
+  orderId: string;
+  refundId: string;
+}): Promise<CashfreeRefundResponse | null> {
+  validateCashfreeConfig();
+
+  const appId = getCashfreeAppId();
+  const secretKey = getCashfreeSecretKey();
+  const baseUrl = getCashfreeBaseUrl();
+  const safeOrderId = params.orderId.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 50);
+  const safeRefundId = params.refundId.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 50);
+
+  const response = await fetch(
+    `${baseUrl}/orders/${safeOrderId}/refunds/${safeRefundId}`,
+    {
+      method: "GET",
+      headers: {
+        "x-api-version": getCashfreeApiVersion(),
+        "x-client-id": appId,
+        "x-client-secret": secretKey,
+      },
+    }
+  );
+
+  if (response.status === 404) return null;
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.message || `Cashfree refund lookup failed with status ${response.status}`);
+  }
+
+  const status = String(data.refund_status || data.status || "PENDING").toUpperCase();
+  if (!["SUCCESS", "PENDING", "CANCELLED", "FAILED"].includes(status)) {
+    throw new Error(`Cashfree returned an unsupported refund status: ${status}`);
+  }
+
+  return {
+    ...data,
+    status,
+    refund_id: String(data.refund_id || safeRefundId),
+    cf_refund_id: data.cf_refund_id ?? "",
+    order_id: String(data.order_id || safeOrderId),
+    refund_amount: Number(data.refund_amount || 0),
+    refund_currency: String(data.refund_currency || "INR"),
+  } as CashfreeRefundResponse;
 }

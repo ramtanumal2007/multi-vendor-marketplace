@@ -60,8 +60,21 @@ export async function GET() {
       return NextResponse.json({ success: false, message: txErr.message }, { status: 500 });
     }
 
+    // Fetch recent admin manual adjustments from seller_ledger_entries
+    const { data: sellerTxs } = await supabaseAdmin
+      .from("seller_ledger_entries")
+      .select("*")
+      .eq("entry_type", "ADMIN_ADJUSTMENT")
+      .order("created_at", { ascending: false })
+      .limit(50);
+
     // Enrich with recipient names
-    const recipientIds = Array.from(new Set((txs || []).map((t) => t.customer_id)));
+    const recipientIds = Array.from(
+      new Set([
+        ...(txs || []).map((t) => t.customer_id),
+        ...(sellerTxs || []).map((s) => s.seller_id),
+      ])
+    );
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, full_name, email, role")
@@ -75,7 +88,7 @@ export async function GET() {
     const profMap = new Map((profiles || []).map((p) => [p.id, p]));
     const sellerMap = new Map((sellerProfiles || []).map((s) => [s.id, s]));
 
-    const enriched = (txs || []).map((tx) => {
+    const customerEnriched = (txs || []).map((tx) => {
       const seller = sellerMap.get(tx.customer_id);
       const prof = profMap.get(tx.customer_id);
 
@@ -96,7 +109,32 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ success: true, transactions: enriched });
+    const sellerEnriched = (sellerTxs || []).map((stx) => {
+      const seller = sellerMap.get(stx.seller_id);
+      const prof = profMap.get(stx.seller_id);
+
+      return {
+        id: stx.id,
+        walletId: null,
+        recipientId: stx.seller_id,
+        recipientType: "seller" as const,
+        recipientName: seller?.business_name || prof?.full_name || prof?.email || "Seller Account",
+        recipientEmail: seller?.business_email || prof?.email,
+        amount: Number(stx.amount_paise) / 100,
+        direction: stx.direction,
+        balanceAfter: Number(stx.available_balance_after_paise) / 100,
+        description: stx.description,
+        idempotencyKey: stx.idempotency_key,
+        createdAt: stx.created_at,
+        referenceId: stx.actor_id,
+      };
+    });
+
+    const allAdjustments = [...customerEnriched, ...sellerEnriched]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 50);
+
+    return NextResponse.json({ success: true, transactions: allAdjustments });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal server error.";
     return NextResponse.json({ success: false, message }, { status: 500 });

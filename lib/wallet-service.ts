@@ -227,17 +227,13 @@ export async function adminManualCreditWallet(
   const cleanRecipientId = recipientId.trim();
 
   // 2. Validate Amount
-  const cleanAmount = Number(amount);
-  if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) {
-    return { success: false, message: "Credit amount must be greater than zero." };
+  const validatedAmount = validateMonetaryAmount(amount);
+  if (!validatedAmount.valid) {
+    return { success: false, message: `Credit amount is invalid: ${validatedAmount.reason || "Invalid monetary value"}` };
   }
+  const cleanAmount = validatedAmount.amount;
   if (cleanAmount > 50000) {
     return { success: false, message: "Credit amount exceeds maximum allowed single adjustment limit of ₹50,000.00." };
-  }
-  // Max 2 decimal places check
-  const amountStr = cleanAmount.toString();
-  if (amountStr.includes(".") && amountStr.split(".")[1].length > 2) {
-    return { success: false, message: "Credit amount can have at most two decimal places." };
   }
 
   // 3. Validate Reason
@@ -290,14 +286,49 @@ export async function adminManualCreditWallet(
     profileUserId = custProf.id;
   }
 
-  // 5. Fetch previous balance
+  // 5. Generate deterministic unique idempotency key
+  const cleanIdempKey = idempotencyKey?.trim() || `ADMIN_CREDIT_${recipientType.toUpperCase()}_${profileUserId}_${Date.now()}`;
+
+  if (recipientType === "seller") {
+    // Authoritative Seller Balance Path: Credit seller balance and record seller ledger entry
+    const { data: sellerBal } = await supabaseAdmin
+      .from("seller_balances")
+      .select("available_balance")
+      .eq("seller_id", profileUserId)
+      .maybeSingle();
+    const previousBalance = Number(sellerBal?.available_balance || 0);
+
+    const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc("admin_credit_seller_balance_atomic", {
+      p_seller_id: profileUserId,
+      p_amount_rupees: cleanAmount,
+      p_reason: cleanReason,
+      p_admin_id: adminUserId,
+      p_admin_email: adminEmail,
+      p_idempotency_key: cleanIdempKey,
+    });
+
+    if (rpcErr || !rpcRes) {
+      console.error("Seller balance admin credit RPC error:", rpcErr);
+      return { success: false, message: rpcErr?.message || "Failed to credit seller balance atomically." };
+    }
+
+    return {
+      success: true,
+      transactionId: rpcRes.transaction_id,
+      newBalance: Number(rpcRes.new_balance),
+      previousBalance: Number(rpcRes.previous_balance ?? previousBalance),
+      amount: cleanAmount,
+      recipientId: profileUserId,
+      recipientType: "seller",
+      recipientName: verifiedName,
+      isDuplicate: rpcRes.is_duplicate || false,
+    };
+  }
+
+  // Authoritative Customer Wallet Path
   const walletBefore = await getOrCreateCustomerWallet(supabaseAdmin, profileUserId);
   const previousBalance = walletBefore.balance;
 
-  // 6. Generate deterministic unique idempotency key
-  const cleanIdempKey = idempotencyKey?.trim() || `ADMIN_CREDIT_${profileUserId}_${Date.now()}`;
-
-  // 7. Execute Atomic Credit
   const creditResult = await creditCustomerWallet(supabaseAdmin, {
     customerId: profileUserId,
     amount: cleanAmount,
@@ -319,7 +350,7 @@ export async function adminManualCreditWallet(
     previousBalance,
     amount: cleanAmount,
     recipientId: profileUserId,
-    recipientType,
+    recipientType: "customer",
     recipientName: verifiedName,
     isDuplicate: creditResult.isDuplicate || false,
   };
@@ -358,6 +389,36 @@ export async function getCustomerWalletTransactions(
   }));
 }
 
+export interface ValidatedMonetaryAmount {
+  valid: boolean;
+  amount: number;
+  paise: number;
+  reason?: string;
+}
+
+/**
+ * Validates monetary amounts to at most 2 decimal places safely,
+ * tolerating floating-point calculation artifacts (such as 0.1 + 0.2).
+ */
+export function validateMonetaryAmount(amount: unknown): ValidatedMonetaryAmount {
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+    return { valid: false, amount: 0, paise: 0, reason: "Amount must be a positive finite number." };
+  }
+
+  const paise = Math.round(amount * 100);
+  if (paise <= 0) {
+    return { valid: false, amount: 0, paise: 0, reason: "Amount must be at least ₹0.01 (1 paisa)." };
+  }
+
+  // Reject genuinely excessive precision beyond 2 decimal places (allowing standard float epsilon)
+  if (Math.abs(amount * 100 - paise) > 1e-4) {
+    return { valid: false, amount: 0, paise: 0, reason: "Amount cannot exceed two decimal places." };
+  }
+
+  const cleanAmount = paise / 100;
+  return { valid: true, amount: cleanAmount, paise };
+}
+
 export interface DebitWalletParams {
   customerId: string;
   amount: number;
@@ -392,11 +453,16 @@ export async function debitCustomerWallet(
     idempotencyKey,
   } = params;
 
-  if (amount <= 0) {
-    return { success: false, newBalance: 0, message: "Debit amount must be greater than zero." };
+  const validated = validateMonetaryAmount(amount);
+  if (!validated.valid) {
+    return {
+      success: false,
+      newBalance: 0,
+      message: `Debit amount is invalid: ${validated.reason || "Invalid monetary value"}`,
+    };
   }
 
-  const cleanAmount = Number(amount.toFixed(2));
+  const cleanAmount = validated.amount;
   const cleanIdempKey = idempotencyKey?.trim() || `${type}_${referenceType}_${referenceId}`;
 
   const { data, error } = await supabaseAdmin.rpc("debit_customer_wallet_atomic", {
@@ -426,6 +492,48 @@ export async function debitCustomerWallet(
     };
   }
 
+  // If RPC reported duplicate idempotency key, verify that the existing transaction matches all requested parameters
+  if (data.is_duplicate) {
+    const { data: existingTx, error: txErr } = await supabaseAdmin
+      .from("wallet_transactions")
+      .select("id, customer_id, type, amount, direction, reference_type, reference_id, balance_after")
+      .eq("idempotency_key", cleanIdempKey)
+      .maybeSingle();
+
+    if (txErr || !existingTx) {
+      return {
+        success: false,
+        newBalance: 0,
+        message: `Duplicate debit detected but ledger entry verification failed: ${txErr?.message || "Transaction not found"}`,
+      };
+    }
+
+    const txPaise = Math.round(Number(existingTx.amount) * 100);
+    const reqPaise = validated.paise;
+    const isSameCustomer = existingTx.customer_id === customerId;
+    const isSameRefType = existingTx.reference_type === referenceType;
+    const isSameRefId = String(existingTx.reference_id) === String(referenceId);
+    const isSameType = existingTx.type === type;
+    const isDebit = existingTx.direction === "debit";
+    const isSameAmount = txPaise === reqPaise;
+
+    if (!isSameCustomer || !isSameRefType || !isSameRefId || !isSameType || !isDebit || !isSameAmount) {
+      return {
+        success: false,
+        newBalance: Number(existingTx.balance_after || 0),
+        message: `Idempotency conflict: Existing wallet transaction with key "${cleanIdempKey}" does not match requested parameters (customer, order reference, type, or amount).`,
+      };
+    }
+
+    return {
+      success: true,
+      newBalance: Number(existingTx.balance_after),
+      transactionId: existingTx.id,
+      isDuplicate: true,
+      message: "Duplicate request verified via idempotency key.",
+    };
+  }
+
   return {
     success: true,
     newBalance: Number(data.balance),
@@ -448,12 +556,14 @@ export async function releaseCustomerWalletDebit(
   }
 ) {
   const { customerId, amount, referenceId, description } = params;
-  if (amount <= 0) return;
+  const validated = validateMonetaryAmount(amount);
+  if (!validated.valid) return;
 
+  const cleanAmount = validated.amount;
   const idempKey = `RELEASE_WALLET_DEBIT_${referenceId}`;
   return creditCustomerWallet(supabaseAdmin, {
     customerId,
-    amount,
+    amount: cleanAmount,
     type: "ADMIN_ADJUSTMENT",
     referenceType: "order",
     referenceId,

@@ -60,7 +60,7 @@ export async function POST(req: Request) {
 
     // 2. Persist Verified Webhook Event Durably Before Processing / Acknowledging
     try {
-      await supabase.from("finance_audit_logs").insert({
+      const { error: auditError } = await supabase.from("finance_audit_logs").insert({
         action_type: "CASHFREE_WEBHOOK_RECEIVED",
         target_entity: "cashfree_webhook",
         notes: String(cfOrderId || cfPaymentId || "unidentified"),
@@ -77,8 +77,13 @@ export async function POST(req: Request) {
           payload,
         },
       });
+      if (auditError) {
+        console.error("Failed to persist incoming webhook audit log:", auditError);
+        return NextResponse.json({ error: "Webhook audit persistence failed. Please retry." }, { status: 503 });
+      }
     } catch (auditErr) {
-      console.warn("Failed to persist incoming webhook audit log:", auditErr);
+      console.error("Failed to persist incoming webhook audit log:", auditErr);
+      return NextResponse.json({ error: "Webhook audit persistence failed. Please retry." }, { status: 503 });
     }
 
     // 3. Resolve Internal MY STORE Order
@@ -88,6 +93,10 @@ export async function POST(req: Request) {
       payment_method: string;
       order_number: string;
       total: number;
+      internal_status?: string | null;
+      status?: string | null;
+      razorpay_payment_id?: string | null;
+      user_id?: string | null;
     }
 
     let targetOrder: WebhookTargetOrder | null = null;
@@ -95,46 +104,46 @@ export async function POST(req: Request) {
     if (internalOrderId && isValidWebhookIdentifier(internalOrderId)) {
       const { data } = await supabase
         .from("orders")
-        .select("id, payment_status, payment_method, order_number, total")
+        .select("id, payment_status, payment_method, order_number, total, internal_status, status, razorpay_payment_id, user_id")
         .eq("id", internalOrderId)
         .maybeSingle();
-      targetOrder = data;
+      targetOrder = data as WebhookTargetOrder | null;
     }
 
     if (!targetOrder && idempotencyKey && isValidWebhookIdentifier(idempotencyKey)) {
       const { data } = await supabase
         .from("orders")
-        .select("id, payment_status, payment_method, order_number, total")
+        .select("id, payment_status, payment_method, order_number, total, internal_status, status, razorpay_payment_id, user_id")
         .eq("idempotency_key", idempotencyKey)
         .maybeSingle();
-      targetOrder = data;
+      targetOrder = data as WebhookTargetOrder | null;
     }
 
     if (!targetOrder && internalOrderNumber && isValidWebhookIdentifier(internalOrderNumber)) {
       const { data } = await supabase
         .from("orders")
-        .select("id, payment_status, payment_method, order_number, total")
+        .select("id, payment_status, payment_method, order_number, total, internal_status, status, razorpay_payment_id, user_id")
         .eq("order_number", internalOrderNumber)
         .maybeSingle();
-      targetOrder = data;
+      targetOrder = data as WebhookTargetOrder | null;
     }
 
     if (!targetOrder && cfPaymentId && isValidWebhookIdentifier(String(cfPaymentId))) {
       const { data } = await supabase
         .from("orders")
-        .select("id, payment_status, payment_method, order_number, total")
+        .select("id, payment_status, payment_method, order_number, total, internal_status, status, razorpay_payment_id, user_id")
         .eq("razorpay_payment_id", String(cfPaymentId))
         .maybeSingle();
-      targetOrder = data;
+      targetOrder = data as WebhookTargetOrder | null;
     }
 
     if (!targetOrder && cfOrderId && isValidWebhookIdentifier(String(cfOrderId))) {
       const { data } = await supabase
         .from("orders")
-        .select("id, payment_status, payment_method, order_number, total")
+        .select("id, payment_status, payment_method, order_number, total, internal_status, status, razorpay_payment_id, user_id")
         .eq("razorpay_payment_id", String(cfOrderId))
         .maybeSingle();
-      targetOrder = data;
+      targetOrder = data as WebhookTargetOrder | null;
     }
 
     // 4. Handle Cashfree Refund Events (REFUND_STATUS_WEBHOOK, REFUND_SUCCESS_WEBHOOK, REFUND_FAILED_WEBHOOK)
@@ -225,74 +234,94 @@ export async function POST(req: Request) {
           { path: "metadata->>cf_refund_id", val: cfRefundId },
         ];
 
+        // Inspect every supplied reference path, not just the first one that matches.
+        // A refund_id and cf_refund_id that point to different orders must fail closed.
+        const cancellationCandidates: Array<{
+          id: string;
+          order_id: string;
+          metadata: any;
+          cancelled_at?: string;
+        }> = [];
+        const seenCancellationIds = new Set<string>();
+
         for (const { path, val } of searchSpecs) {
           if (!val || !isValidWebhookIdentifier(val)) continue;
 
-          // Fetch candidate cancellations ordered by cancelled_at DESC (fetching 2 to guard against ambiguity)
           const { data: candRows, error: cancErr } = await supabase
             .from("order_cancellations")
             .select("id, order_id, metadata, cancelled_at")
             .eq(path, val)
             .order("cancelled_at", { ascending: false })
-            .limit(2);
+            .limit(1000);
 
           if (cancErr) {
             console.error(`Database error querying order_cancellations via ${path}:`, cancErr);
             return NextResponse.json({ error: "Database error during cancellation lookup." }, { status: 500 });
           }
 
-          if (candRows && candRows.length > 0) {
-            if (candRows.length > 1) {
-              const distinctOrderIds = Array.from(new Set(candRows.map((c) => c.order_id)));
-              if (distinctOrderIds.length > 1) {
-                console.error("Ambiguous cancellation refund reference detected across distinct orders:", {
-                  val,
-                  distinctOrderIds,
-                });
-                // Attempt resolution using webhook refundOrderId if available
-                if (refundOrderId && isValidWebhookIdentifier(refundOrderId)) {
-                  for (const cand of candRows) {
-                    const { data: ord, error: ordErr } = await supabase
-                      .from("orders")
-                      .select("id, payment_status, payment_method, order_number, total, razorpay_payment_id")
-                      .eq("id", cand.order_id)
-                      .maybeSingle();
+          // A saturated result set cannot prove uniqueness. Do not guess an order.
+          if ((candRows || []).length >= 1000) {
+            console.error("Cancellation refund reference lookup reached its safety limit:", { path, val });
+            return NextResponse.json(
+              { error: "Refund reference matched too many cancellation records to resolve safely." },
+              { status: 409 }
+            );
+          }
 
-                    if (ordErr) {
-                      return NextResponse.json({ error: "Database error during order verification." }, { status: 500 });
-                    }
+          for (const candidate of candRows || []) {
+            if (!seenCancellationIds.has(candidate.id)) {
+              seenCancellationIds.add(candidate.id);
+              cancellationCandidates.push(candidate);
+            }
+          }
+        }
 
-                    if (
-                      ord &&
-                      (ord.id === refundOrderId ||
-                        ord.order_number === refundOrderId ||
-                        ord.razorpay_payment_id === refundOrderId)
-                    ) {
-                      matchedCancellation = cand;
-                      refundOrder = ord;
-                      break;
-                    }
-                  }
-                  if (!matchedCancellation) {
-                    return NextResponse.json(
-                      { error: "Ambiguous refund reference could not be resolved to a unique order." },
-                      { status: 409 }
-                    );
-                  }
-                } else {
-                  return NextResponse.json(
-                    { error: "Ambiguous refund reference matched multiple distinct orders." },
-                    { status: 409 }
-                  );
-                }
-              } else {
-                matchedCancellation = candRows[0];
-              }
-            } else {
-              matchedCancellation = candRows[0];
+        if (cancellationCandidates.length > 0) {
+          const distinctOrderIds = Array.from(new Set(cancellationCandidates.map((c) => c.order_id)));
+
+          if (distinctOrderIds.length > 1) {
+            if (!refundOrderId || !isValidWebhookIdentifier(refundOrderId)) {
+              console.error("Ambiguous cancellation refund reference matched multiple orders:", distinctOrderIds);
+              return NextResponse.json(
+                { error: "Ambiguous refund reference matched multiple orders and no trusted order identifier was supplied." },
+                { status: 409 }
+              );
             }
 
-            break; // Stop after first successful matching spec
+            const { data: candidateOrders, error: candidateOrdersError } = await supabase
+              .from("orders")
+              .select("id, payment_status, payment_method, order_number, total, razorpay_payment_id")
+              .in("id", distinctOrderIds);
+
+            if (candidateOrdersError) {
+              console.error("Database error verifying ambiguous cancellation orders:", candidateOrdersError);
+              return NextResponse.json({ error: "Database error during order verification." }, { status: 500 });
+            }
+
+            const matchingOrders = (candidateOrders || []).filter((ord) =>
+              ord.id === refundOrderId ||
+              ord.order_number === refundOrderId ||
+              ord.razorpay_payment_id === refundOrderId
+            );
+
+            if (matchingOrders.length !== 1) {
+              return NextResponse.json(
+                { error: "Ambiguous refund reference could not be resolved to exactly one order." },
+                { status: 409 }
+              );
+            }
+
+            refundOrder = matchingOrders[0];
+            matchedCancellation =
+              cancellationCandidates
+                .filter((candidate) => candidate.order_id === refundOrder!.id)
+                .sort((a, b) => (Date.parse(b.cancelled_at || "") || 0) - (Date.parse(a.cancelled_at || "") || 0))[0] || null;
+          } else {
+            // Multiple records for the same order are not a cross-order ambiguity.
+            // Select the newest order-level/metadata candidate; the atomic RPC then
+            // performs its own order-row lock and deterministic cancellation-row lookup.
+            matchedCancellation = cancellationCandidates
+              .sort((a, b) => (Date.parse(b.cancelled_at || "") || 0) - (Date.parse(a.cancelled_at || "") || 0))[0];
           }
         }
 
@@ -401,7 +430,10 @@ export async function POST(req: Request) {
 
       const orderTotal = Number(refundOrder.total || 0);
 
-      // 4a. Attempt atomic database reconciliation with row locking if RPC is available
+      // Atomic reconciliation is mandatory. The application fallback below was
+      // unsafe under concurrent webhook delivery because it had no row-level lock.
+      // If the RPC migration is not installed or the database is unavailable,
+      // return a retryable response so Cashfree can redeliver the webhook.
       try {
         const { data: rpcResult, error: rpcError } = await supabase.rpc("reconcile_cashfree_refund_atomic", {
           p_order_id: refundOrder.id,
@@ -415,395 +447,46 @@ export async function POST(req: Request) {
           p_timestamp: timestamp ? new Date(Number(timestamp) * 1000).toISOString() : new Date().toISOString(),
         });
 
-        if (!rpcError && rpcResult && typeof rpcResult === "object") {
-          const resObj = rpcResult as Record<string, unknown>;
-          if (resObj.success === false) {
-            console.error("reconcile_cashfree_refund_atomic RPC rejected refund:", resObj);
-            const errMsg = String(resObj.message || resObj.error || "Refund reconciliation rejected.");
-            const statusCode = resObj.error === "ORDER_NOT_FOUND" ? 404 : 400;
-            return NextResponse.json({ error: errMsg, details: resObj }, { status: statusCode });
-          } else {
-            return NextResponse.json(resObj);
-          }
-        }
         if (rpcError) {
-          console.warn("reconcile_cashfree_refund_atomic RPC execution error:", rpcError);
-          // Only fall back to application reconciliation if the RPC is genuinely not installed
-          const isFunctionMissing = rpcError.code === "PGRST202" ||
-                                    rpcError.message?.includes("function") ||
-                                    rpcError.message?.includes("not found");
-          if (!isFunctionMissing) {
-            return NextResponse.json(
-              { error: "Atomic refund reconciliation failed in database.", details: rpcError.message },
-              { status: 500 }
-            );
-          }
+          console.error("Atomic Cashfree refund reconciliation unavailable; requesting webhook retry:", rpcError);
+          return NextResponse.json(
+            { error: "Atomic refund reconciliation is unavailable. Webhook retry required." },
+            { status: 503 }
+          );
         }
+
+        if (!rpcResult || typeof rpcResult !== "object") {
+          console.error("Atomic Cashfree refund reconciliation returned an invalid result:", rpcResult);
+          return NextResponse.json(
+            { error: "Atomic refund reconciliation returned an invalid result. Webhook retry required." },
+            { status: 503 }
+          );
+        }
+
+        const resObj = rpcResult as Record<string, unknown>;
+        if (resObj.success === false) {
+          console.error("reconcile_cashfree_refund_atomic RPC rejected refund:", resObj);
+          const errMsg = String(resObj.message || resObj.error || "Refund reconciliation rejected.");
+          const statusCode = resObj.error === "ORDER_NOT_FOUND" ? 404 : 400;
+          return NextResponse.json({ error: errMsg, details: resObj }, { status: statusCode });
+        }
+        return NextResponse.json(resObj);
       } catch (rpcCatchErr) {
-        // Fall back cleanly if RPC is not yet applied in current database environment
-        console.warn("reconcile_cashfree_refund_atomic RPC fallback to application reconciliation:", rpcCatchErr);
-      }
-
-      // 4b. Application-Level Fallback Reconciliation (Exact Integer Paise Precision)
-      // Guard: An order that was never paid (pending or failed) cannot be refunded
-      if (refundOrder.payment_status !== "paid" && refundOrder.payment_status !== "refunded") {
-        console.error(`Cannot refund order #${refundOrder.order_number} with payment status '${refundOrder.payment_status}'.`);
+        console.error("Atomic Cashfree refund reconciliation threw; requesting webhook retry:", rpcCatchErr);
         return NextResponse.json(
-          { error: `Cannot refund order #${refundOrder.order_number} with payment status '${refundOrder.payment_status}'. Only paid orders can be refunded.` },
-          { status: 400 }
+          { error: "Atomic refund reconciliation failed. Webhook retry required." },
+          { status: 503 }
         );
-      }
-
-      // Deterministically fetch primary cancellation record (order-level first, then latest cancelled_at)
-      const { data: cancellations } = await supabase
-        .from("order_cancellations")
-        .select("id, metadata, order_item_id, cancelled_at")
-        .eq("order_id", refundOrder.id)
-        .order("cancelled_at", { ascending: false });
-
-      const cancellation = cancellations && cancellations.length > 0
-        ? (cancellations.find((c: { order_item_id?: string | null }) => c.order_item_id === null) || cancellations[0])
-        : null;
-
-      const existingMeta = (cancellation?.metadata || {}) as Record<string, unknown>;
-
-      interface ConfirmedRefundItem {
-        refund_id: string;
-        cf_refund_id?: string;
-        amount: number;
-        arn?: string | null;
-        status: string;
-        confirmed_at: string;
-      }
-
-      // Reconstruct list of previously confirmed refunds
-      let recordedRefunds: ConfirmedRefundItem[] = Array.isArray(existingMeta.successful_refunds)
-        ? [...(existingMeta.successful_refunds as ConfirmedRefundItem[])]
-        : [];
-
-      // Check legacy single-refund metadata fields if successful_refunds array is not yet seeded
-      if (
-        recordedRefunds.length === 0 &&
-        existingMeta.gateway_refund_status === "SUCCESS" &&
-        (existingMeta.gateway_refund_id || existingMeta.refund_id)
-      ) {
-        recordedRefunds.push({
-          refund_id: String(existingMeta.gateway_refund_id || existingMeta.refund_id),
-          cf_refund_id: existingMeta.cf_refund_id ? String(existingMeta.cf_refund_id) : undefined,
-          amount: Number(existingMeta.gateway_refund_amount || 0),
-          arn: existingMeta.gateway_refund_arn ? String(existingMeta.gateway_refund_arn) : null,
-          status: "SUCCESS",
-          confirmed_at: String(existingMeta.gateway_refund_confirmed_at || new Date().toISOString()),
-        });
-      }
-
-      // Check finance_audit_logs for any previous confirmed refunds (both partial and full)
-      const { data: auditLogs } = await supabase
-        .from("finance_audit_logs")
-        .select("new_values")
-        .eq("target_entity", "orders")
-        .eq("target_id", refundOrder.id)
-        .in("action_type", ["CASHFREE_REFUND_CONFIRMED", "CASHFREE_PARTIAL_REFUND_CONFIRMED"]);
-
-      if (auditLogs && auditLogs.length > 0) {
-        for (const log of auditLogs) {
-          const vals = (log.new_values || {}) as Record<string, unknown>;
-          const aRefId = String(vals.refundId || vals.cfRefundId || "");
-          if (aRefId && !recordedRefunds.some((r) => r.refund_id === aRefId || (r.cf_refund_id && r.cf_refund_id === aRefId))) {
-            recordedRefunds.push({
-              refund_id: aRefId,
-              cf_refund_id: vals.cfRefundId ? String(vals.cfRefundId) : undefined,
-              amount: Number(vals.refundAmount || 0),
-              arn: vals.refundArn ? String(vals.refundArn) : null,
-              status: "SUCCESS",
-              confirmed_at: String(vals.timestamp || new Date().toISOString()),
-            });
-          }
-        }
-      }
-
-      // 4c. Idempotency Check at specific refund event level
-      const currentRefKey = refundId || cfRefundId;
-      const isCurrentEventAlreadyProcessed = Boolean(
-        currentRefKey &&
-        recordedRefunds.some(
-          (r) =>
-            (refundId && (r.refund_id === refundId || r.cf_refund_id === refundId)) ||
-            (cfRefundId && (r.cf_refund_id === cfRefundId || r.refund_id === cfRefundId))
-        )
-      );
-
-      if (isCurrentEventAlreadyProcessed) {
-        console.log(`Refund event ${currentRefKey} for order #${refundOrder.order_number} already processed. Idempotent skip.`);
-        return NextResponse.json({
-          received: true,
-          already_processed: true,
-          orderId: refundOrder.id,
-          refundId: currentRefKey,
-          cumulative_refund_amount: recordedRefunds.reduce((sum, r) => sum + Number(r.amount || 0), 0),
-        });
-      }
-
-      // If entire order is already marked refunded and cumulative total reached:
-      if (refundOrder.payment_status === "refunded") {
-        console.log(`Order #${refundOrder.order_number} is already marked fully refunded. Idempotent skip.`);
-        return NextResponse.json({
-          received: true,
-          already_refunded: true,
-          orderId: refundOrder.id,
-          refundId: currentRefKey,
-        });
-      }
-
-      // 4d. Exact Integer Paise Arithmetic (Zero Slack, No ₹0.05 tolerance)
-      const orderTotalPaise = Math.round(orderTotal * 100);
-      const refundAmountPaise = Math.round(refundAmount * 100);
-      const previousCumulativePaise = recordedRefunds.reduce((sum, r) => sum + Math.round(Number(r.amount || 0) * 100), 0);
-      const newCumulativePaise = previousCumulativePaise + refundAmountPaise;
-
-      // Authoritative cumulative amount check with exact integer paise precision
-      if (refundAmountPaise > 0 && newCumulativePaise > orderTotalPaise) {
-        console.error(`Refund amount ₹${refundAmount} (cumulative ₹${(newCumulativePaise / 100).toFixed(2)}) exceeds authoritative order total ₹${orderTotal}`);
-        return NextResponse.json(
-          { error: "Cumulative refund amount exceeds authoritative order total." },
-          { status: 400 }
-        );
-      }
-
-      const nowIso = new Date().toISOString();
-
-      if (rawRefundStatus === "SUCCESS" || eventType === "REFUND_SUCCESS_WEBHOOK") {
-        const isFullyRefunded = newCumulativePaise >= orderTotalPaise;
-        const newCumulativeRefund = Math.round(newCumulativePaise) / 100;
-        const remainingPaise = Math.max(0, orderTotalPaise - newCumulativePaise);
-        const remainingAmount = Math.round(remainingPaise) / 100;
-
-        // Record this successful refund item
-        recordedRefunds.push({
-          refund_id: refundId || cfRefundId || `ref_${Date.now()}`,
-          cf_refund_id: cfRefundId || undefined,
-          amount: refundAmount,
-          arn: refundArn,
-          status: "SUCCESS",
-          confirmed_at: nowIso,
-        });
-
-        // ONLY transition orders.payment_status to 'refunded' if cumulative refunds reach or exceed order total!
-        // Respects orders_payment_status_check constraint: ('pending', 'paid', 'failed', 'refunded').
-        if (isFullyRefunded) {
-          await supabase
-            .from("orders")
-            .update({
-              payment_status: "refunded",
-              updated_at: nowIso,
-            })
-            .eq("id", refundOrder.id);
-          console.log(`Order #${refundOrder.order_number} fully refunded (cumulative: ₹${newCumulativeRefund} / ₹${orderTotal}). payment_status -> refunded.`);
-        } else {
-          console.log(`Order #${refundOrder.order_number} partially refunded (cumulative: ₹${newCumulativeRefund} / ₹${orderTotal}). payment_status remains paid.`);
-        }
-
-        // Persist cumulative refund records in cancellation metadata
-        if (cancellation) {
-          await supabase
-            .from("order_cancellations")
-            .update({
-              metadata: {
-                ...existingMeta,
-                successful_refunds: recordedRefunds,
-                cumulative_refund_amount: newCumulativeRefund,
-                gateway_refund_status: isFullyRefunded ? "SUCCESS" : "PARTIAL_SUCCESS",
-                gateway_refund_arn: refundArn || existingMeta.gateway_refund_arn,
-                gateway_refund_id: refundId || cfRefundId || existingMeta.gateway_refund_id,
-                gateway_refund_amount: newCumulativeRefund,
-                gateway_refund_confirmed_at: nowIso,
-                remaining_refundable_amount: remainingAmount,
-                gateway_refund_response: {
-                  ...(typeof existingMeta.gateway_refund_response === "object" ? existingMeta.gateway_refund_response : {}),
-                  status: isFullyRefunded ? "SUCCESS" : "PARTIAL_SUCCESS",
-                  cf_refund_id: cfRefundId,
-                  refund_id: refundId,
-                  refund_arn: refundArn,
-                  cumulative_amount: newCumulativeRefund,
-                },
-              },
-            })
-            .eq("id", cancellation.id);
-        }
-
-        try {
-          await supabase.from("finance_audit_logs").insert({
-            action_type: isFullyRefunded ? "CASHFREE_REFUND_CONFIRMED" : "CASHFREE_PARTIAL_REFUND_CONFIRMED",
-            target_entity: "orders",
-            target_id: refundOrder.id,
-            notes: String(cfRefundId || refundId || refundOrder.order_number),
-            new_values: {
-              orderId: refundOrder.id,
-              orderNumber: refundOrder.order_number,
-              refundId,
-              cfRefundId,
-              refundAmount,
-              cumulativeRefundAmount: newCumulativeRefund,
-              orderTotal,
-              isFullyRefunded,
-              refundArn,
-              status: "SUCCESS",
-              timestamp,
-            },
-          });
-        } catch {}
-
-        return NextResponse.json({
-          received: true,
-          refunded: isFullyRefunded,
-          is_partial: !isFullyRefunded,
-          status: "SUCCESS",
-          orderId: refundOrder.id,
-          refundId: refundId || cfRefundId,
-          cumulative_refund_amount: newCumulativeRefund,
-          remaining_amount: remainingAmount,
-        });
-      }
-
-      if (rawRefundStatus === "PENDING") {
-        // Late arrival protection: If this refund ID was already confirmed SUCCESS, do not downgrade
-        if (isCurrentEventAlreadyProcessed) {
-          return NextResponse.json({ received: true, already_processed: true, orderId: refundOrder.id });
-        }
-
-        // Keep payment_status as paid (do not treat pending as success)
-        if (cancellation) {
-          await supabase
-            .from("order_cancellations")
-            .update({
-              metadata: {
-                ...existingMeta,
-                gateway_refund_status: "PENDING",
-                gateway_refund_id: refundId || cfRefundId || existingMeta.gateway_refund_id,
-              },
-            })
-            .eq("id", cancellation.id);
-        }
-
-        const refundKey = String(cfRefundId || refundId || refundOrder.order_number);
-        // Prevent duplicate PENDING audit logs
-        const { data: existingPendingLog } = await supabase
-          .from("finance_audit_logs")
-          .select("id")
-          .eq("target_entity", "orders")
-          .eq("target_id", refundOrder.id)
-          .eq("action_type", "CASHFREE_REFUND_PENDING")
-          .eq("notes", refundKey)
-          .limit(1)
-          .maybeSingle();
-
-        if (existingPendingLog) {
-          return NextResponse.json({
-            received: true,
-            already_processed: true,
-            refunded: false,
-            status: "PENDING",
-            orderId: refundOrder.id,
-          });
-        }
-
-        try {
-          await supabase.from("finance_audit_logs").insert({
-            action_type: "CASHFREE_REFUND_PENDING",
-            target_entity: "orders",
-            target_id: refundOrder.id,
-            notes: refundKey,
-            new_values: {
-              orderId: refundOrder.id,
-              refundId,
-              cfRefundId,
-              refundAmount,
-              status: "PENDING",
-              timestamp,
-            },
-          });
-        } catch {}
-
-        return NextResponse.json({
-          received: true,
-          refunded: false,
-          status: "PENDING",
-          orderId: refundOrder.id,
-        });
-      }
-
-      if (rawRefundStatus === "FAILED" || rawRefundStatus === "CANCELLED" || eventType === "REFUND_FAILED_WEBHOOK") {
-        // Late arrival protection: If this refund ID was already confirmed SUCCESS, do not downgrade
-        if (isCurrentEventAlreadyProcessed) {
-          return NextResponse.json({ received: true, already_processed: true, orderId: refundOrder.id });
-        }
-
-        // Keep payment_status as paid. Record failure in metadata and audit log.
-        if (cancellation) {
-          await supabase
-            .from("order_cancellations")
-            .update({
-              metadata: {
-                ...existingMeta,
-                gateway_refund_status: "FAILED",
-                gateway_refund_failure_reason: refundNote || "Gateway refund declined by bank",
-                gateway_refund_id: refundId || cfRefundId || existingMeta.gateway_refund_id,
-              },
-            })
-            .eq("id", cancellation.id);
-        }
-
-        const refundKey = String(cfRefundId || refundId || refundOrder.order_number);
-        // Prevent duplicate FAILED audit logs
-        const { data: existingFailedLog } = await supabase
-          .from("finance_audit_logs")
-          .select("id")
-          .eq("target_entity", "orders")
-          .eq("target_id", refundOrder.id)
-          .eq("action_type", "CASHFREE_REFUND_FAILED")
-          .eq("notes", refundKey)
-          .limit(1)
-          .maybeSingle();
-
-        if (existingFailedLog) {
-          return NextResponse.json({
-            received: true,
-            already_processed: true,
-            refunded: false,
-            status: "FAILED",
-            orderId: refundOrder.id,
-          });
-        }
-
-        try {
-          await supabase.from("finance_audit_logs").insert({
-            action_type: "CASHFREE_REFUND_FAILED",
-            target_entity: "orders",
-            target_id: refundOrder.id,
-            notes: refundKey,
-            new_values: {
-              orderId: refundOrder.id,
-              refundId,
-              cfRefundId,
-              refundAmount,
-              status: "FAILED",
-              reason: refundNote,
-              timestamp,
-            },
-          });
-        } catch {}
-
-        return NextResponse.json({
-          received: true,
-          refunded: false,
-          status: "FAILED",
-          orderId: refundOrder.id,
-        });
       }
 
       // Default acknowledgement for other unclassified refund states
-      return NextResponse.json({ received: true, unclassified_refund_status: rawRefundStatus, orderId: refundOrder.id });
+      return NextResponse.json({
+        received: true,
+        unclassified_refund_status: rawRefundStatus,
+        ...(refundOrder ? { orderId: refundOrder!.id } : {}),
+      });
     }
+
 
     // 5. Handle Payment Success (PAYMENT_SUCCESS_WEBHOOK or payment_status === SUCCESS)
     const isSuccess =
@@ -857,30 +540,151 @@ export async function POST(req: Request) {
       const paidPaise = Math.round(paidAmount * 100);
       const expectedPaise = Math.round(expectedTotal * 100);
 
-      // Reject underpayment strictly
-      if (paidPaise < expectedPaise) {
+      // Require exact amount match in integer paise; reject both underpayment and overpayment.
+      if (paidPaise !== expectedPaise) {
         console.error(
-          `Underpayment rejected for order ${targetOrder.order_number}: received ₹${paidAmount} (${paidPaise} paise), expected ₹${expectedTotal} (${expectedPaise} paise)`
+          `Payment amount mismatch rejected for order ${targetOrder.order_number}: received ₹${paidAmount} (${paidPaise} paise), expected ₹${expectedTotal} (${expectedPaise} paise)`
         );
         return NextResponse.json(
-          { error: "Payment amount is less than authoritative order total. Underpayment rejected." },
+          { error: "Payment amount does not match authoritative order total. Payment rejected." },
           { status: 400 }
         );
       }
 
-      // Idempotent reconciliation: Update only if not already marked paid
-      if (targetOrder.payment_status !== "paid") {
-        await supabase
-          .from("orders")
-          .update({
-            payment_status: "paid",
-            payment_method: "ONLINE",
-            razorpay_payment_id: String(cfPaymentId || cfOrderId),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", targetOrder.id);
-        console.log(`Reconciled order ${targetOrder.order_number} to paid via Cashfree webhook.`);
+      // 4a. Cancelled Order Late Payment Protection
+      const orderInternalStatus = (targetOrder.internal_status || targetOrder.status || "").toUpperCase();
+      if (orderInternalStatus === "CANCELLED") {
+        console.warn(`Payment success received for cancelled order ${targetOrder.order_number}:`, {
+          orderId: targetOrder.id,
+          cfOrderId,
+          cfPaymentId,
+          paidAmount,
+        });
+
+        // Safely and idempotently log to finance_audit_logs
+        try {
+          const incomingRef = String(cfPaymentId || cfOrderId || "unidentified");
+          const { data: existingLog } = await supabase
+            .from("finance_audit_logs")
+            .select("id")
+            .eq("action_type", "PAYMENT_RECEIVED_FOR_CANCELLED_ORDER")
+            .eq("target_id", targetOrder.id)
+            .eq("notes", incomingRef)
+            .maybeSingle();
+
+          if (!existingLog) {
+            await supabase.from("finance_audit_logs").insert({
+              action_type: "PAYMENT_RECEIVED_FOR_CANCELLED_ORDER",
+              target_entity: "orders",
+              target_id: targetOrder.id,
+              notes: incomingRef,
+              new_values: {
+                cfOrderId,
+                cfPaymentId,
+                orderId: targetOrder.id,
+                orderNumber: targetOrder.order_number,
+                amount: paidAmount,
+                paidPaise,
+                status: "CANCELLED",
+                reason: "Payment succeeded after order was cancelled",
+                timestamp: new Date().toISOString(),
+              },
+            });
+          }
+        } catch (auditErr) {
+          console.error("Failed to insert audit log for cancelled order payment:", auditErr);
+        }
+
+        // Return HTTP 200 with clear action_required so Cashfree does not endlessly retry an already recorded event
+        return NextResponse.json({
+          received: true,
+          reconciled: false,
+          orderId: targetOrder.id,
+          status: "CANCELLED_ORDER_PAYMENT_RECORDED",
+          action_required: "REFUND_OR_MANUAL_REVIEW",
+        });
       }
+
+      // 4b. Duplicate Captured Payment Detection Across Attempts
+      const incomingPaymentRef = cfPaymentId ? String(cfPaymentId) : (cfOrderId ? String(cfOrderId) : null);
+      const existingPaymentRef = targetOrder.razorpay_payment_id ? String(targetOrder.razorpay_payment_id) : null;
+
+      if (targetOrder.payment_status === "paid") {
+        if (existingPaymentRef && incomingPaymentRef && existingPaymentRef !== incomingPaymentRef) {
+          console.warn(
+            `Distinct captured Cashfree payment detected for order ${targetOrder.order_number}: incoming ${incomingPaymentRef}, existing ${existingPaymentRef}`
+          );
+
+          // Idempotent duplicate payment audit logging
+          try {
+            const { data: existingDupLog } = await supabase
+              .from("finance_audit_logs")
+              .select("id")
+              .eq("action_type", "DUPLICATE_PAYMENT_CAPTURED")
+              .eq("target_id", targetOrder.id)
+              .eq("notes", incomingPaymentRef)
+              .maybeSingle();
+
+            if (!existingDupLog) {
+              await supabase.from("finance_audit_logs").insert({
+                action_type: "DUPLICATE_PAYMENT_CAPTURED",
+                target_entity: "orders",
+                target_id: targetOrder.id,
+                notes: incomingPaymentRef,
+                new_values: {
+                  cfOrderId,
+                  cfPaymentId: incomingPaymentRef,
+                  primaryPaymentId: existingPaymentRef,
+                  duplicatePaymentId: incomingPaymentRef,
+                  orderId: targetOrder.id,
+                  orderNumber: targetOrder.order_number,
+                  amount: paidAmount,
+                  paidPaise,
+                  status: "DUPLICATE_PAYMENT",
+                  reason: "Distinct successful payment captured for already-paid order",
+                  timestamp: new Date().toISOString(),
+                },
+              });
+            }
+          } catch (auditErr) {
+            console.error("Failed to insert duplicate payment audit log:", auditErr);
+          }
+
+          return NextResponse.json({
+            received: true,
+            reconciled: false,
+            orderId: targetOrder.id,
+            status: "DUPLICATE_PAYMENT_RECORDED",
+            action_required: "REFUND_REQUIRED_DUPLICATE_CHARGE",
+            primaryPaymentId: existingPaymentRef,
+            duplicatePaymentId: incomingPaymentRef,
+          });
+        }
+
+        // Repeated identical payment event: return 200 idempotent acknowledgment
+        return NextResponse.json({
+          received: true,
+          reconciled: true,
+          orderId: targetOrder.id,
+          is_duplicate_event: true,
+        });
+      }
+
+      // Idempotent reconciliation: Update only if not already marked paid
+      const { error: paymentUpdateError } = await supabase
+        .from("orders")
+        .update({
+          payment_status: "paid",
+          payment_method: "ONLINE",
+          razorpay_payment_id: String(cfPaymentId || cfOrderId),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", targetOrder.id);
+      if (paymentUpdateError) {
+        console.error(`Failed to reconcile paid status for order ${targetOrder.order_number}:`, paymentUpdateError);
+        return NextResponse.json({ error: "Payment status update failed. Please retry." }, { status: 503 });
+      }
+      console.log(`Reconciled order ${targetOrder.order_number} to paid via Cashfree webhook.`);
 
       return NextResponse.json({ received: true, reconciled: true, orderId: targetOrder.id });
     }
@@ -888,13 +692,17 @@ export async function POST(req: Request) {
     if (isFailure && targetOrder) {
       // Safety rule: Never overwrite an already confirmed successful payment with failed!
       if (targetOrder.payment_status !== "paid") {
-        await supabase
+        const { error: paymentUpdateError } = await supabase
           .from("orders")
           .update({
             payment_status: "failed",
             updated_at: new Date().toISOString(),
           })
           .eq("id", targetOrder.id);
+        if (paymentUpdateError) {
+          console.error(`Failed to mark order ${targetOrder.order_number} as failed:`, paymentUpdateError);
+          return NextResponse.json({ error: "Payment failure status update failed. Please retry." }, { status: 503 });
+        }
         console.log(`Order ${targetOrder.order_number} marked as failed via Cashfree webhook.`);
       }
       return NextResponse.json({ received: true, status: "failed", orderId: targetOrder.id });
@@ -915,11 +723,14 @@ export async function POST(req: Request) {
       if (draftRow && draftRow.new_values) {
         const draft = draftRow.new_values;
 
-        // Validate currency and amount strictly
+        // Validate currency and amount strictly in integer paise (identical to linked path)
         const rawPaidAmount = paymentData.payment_amount ?? orderData.order_amount;
         const paidAmount = Number(rawPaidAmount);
         const expectedAmount = Number(draft.grandTotal || 0);
         const currency = String(paymentData.payment_currency || orderData.order_currency || "INR").toUpperCase();
+
+        const paidPaise = Math.round(paidAmount * 100);
+        const expectedPaise = Math.round(expectedAmount * 100);
 
         const isAmountValid =
           rawPaidAmount !== null &&
@@ -929,7 +740,7 @@ export async function POST(req: Request) {
           paidAmount > 0 &&
           Number.isFinite(expectedAmount) &&
           expectedAmount > 0 &&
-          Math.abs(Math.round(paidAmount * 100) - Math.round(expectedAmount * 100)) <= 1;
+          paidPaise === expectedPaise;
 
         if (currency === "INR" && isAmountValid) {
           // Authoritatively instantiate order from durable draft
@@ -963,7 +774,7 @@ export async function POST(req: Request) {
                   orderNumber: orderRes.order_number,
                 },
               });
-            } catch {}
+            } catch { }
 
             return NextResponse.json({
               received: true,

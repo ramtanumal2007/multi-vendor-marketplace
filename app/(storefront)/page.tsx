@@ -4,14 +4,14 @@ import React, { useEffect, useState, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  ArrowRight, 
-  ChevronLeft, 
-  ChevronRight, 
-  ShieldCheck, 
-  Truck, 
-  RefreshCw, 
-  Zap, 
+import {
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  ShieldCheck,
+  Truck,
+  RefreshCw,
+  Zap,
   Sparkles,
   Shirt,
   Apple,
@@ -33,10 +33,10 @@ import { InteractiveCategoryShowcase, StorefrontGridConfig } from "@/components/
 import { createClient } from "@/lib/supabase";
 import { useToast } from "@/components/ui/Toast";
 import { useCart } from "@/lib/context/CartContext";
-import { 
-  fetchMerchandisingSignals, 
-  rankProducts, 
-  MerchandisedProduct 
+import {
+  fetchMerchandisingSignals,
+  rankProducts,
+  MerchandisedProduct
 } from "@/lib/merchandising";
 
 interface HeroSlide {
@@ -158,7 +158,7 @@ const MARKETPLACE_CATEGORIES = [
     slug: "hand-craft",
     icon: Palette,
     description: "Artisan crafts, terracotta & handmade decor",
-    image: "https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=600&q=80",
+    image: "/placeholder.jpg",
   },
 ];
 
@@ -182,7 +182,7 @@ export default function Homepage() {
   const { addToast } = useToast();
   const { addItem } = useCart();
   const supabase = createClient();
-  
+
   // Data States
   const [heroSlides, setHeroSlides] = useState<HeroSlide[]>([]);
   const [trendingNow, setTrendingNow] = useState<MerchandisedProduct[]>([]);
@@ -408,9 +408,8 @@ export default function Homepage() {
                     <button
                       key={i}
                       onClick={() => setCurrentSlide(i)}
-                      className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${
-                        currentSlide === i ? "bg-white w-5 sm:w-7" : "bg-white/50 w-1.5 sm:w-2 hover:bg-white/80"
-                      }`}
+                      className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${currentSlide === i ? "bg-white w-5 sm:w-7" : "bg-white/50 w-1.5 sm:w-2 hover:bg-white/80"
+                        }`}
                       aria-label={`Slide ${i + 1}`}
                     />
                   ))}
@@ -568,11 +567,10 @@ export default function Homepage() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveDiscoverTab(tab.id)}
-                    className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 ${
-                      isSelected
-                        ? "bg-accent text-white shadow-md shadow-accent/25 scale-[1.02]"
-                        : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60"
-                    }`}
+                    className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 ${isSelected
+                      ? "bg-accent text-white shadow-md shadow-accent/25 scale-[1.02]"
+                      : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60"
+                      }`}
                   >
                     <span>{tab.icon}</span>
                     <span>{tab.label}</span>
@@ -688,7 +686,7 @@ export default function Homepage() {
                   className="object-cover group-hover:scale-105 transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
-                
+
                 <div className="relative z-10 flex flex-col gap-1">
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/20 backdrop-blur-md w-fit text-yellow-300">
                     {card.badge}

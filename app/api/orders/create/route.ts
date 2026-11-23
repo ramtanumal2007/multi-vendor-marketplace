@@ -35,49 +35,69 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. ENFORCE AUTHENTICATION FOR WALLET USAGE
-    if (paymentMethod === "WALLET" || appliedWallet > 0) {
-      const cookieStore = cookies();
-      const supabaseUser = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() {
-              return cookieStore.getAll();
-            },
-            setAll(cookiesToSet) {
-              try {
-                cookiesToSet.forEach(({ name, value, options }) =>
-                  cookieStore.set(name, value, options)
-                );
-              } catch {}
-            },
+    // 3. Resolve authenticated identity for all checkout requests
+    const cookieStore = cookies();
+
+    const supabaseUser = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
           },
-        }
-      );
-
-      const {
-        data: { user },
-        error: authErr,
-      } = await supabaseUser.auth.getUser();
-
-      if (authErr || !user) {
-        return NextResponse.json(
-          { success: false, message: "Authentication required to apply wallet balance." },
-          { status: 401 }
-        );
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) =>
+                cookieStore.set(name, value, options)
+              );
+            } catch { }
+          },
+        },
       }
+    );
 
-      // Ensure caller cannot debit another customer's wallet
+    const {
+      data: { user },
+      error: authErr,
+    } = await supabaseUser.auth.getUser();
+
+    // Allow a genuinely missing session for guest COD checkout
+    if (authErr && authErr.name !== "AuthSessionMissingError") {
+      return NextResponse.json(
+        { success: false, message: "Unable to verify your session." },
+        { status: 401 }
+      );
+    }
+
+    const requiresAuthenticatedUser =
+      paymentMethod === "WALLET" || appliedWallet > 0;
+
+    if (requiresAuthenticatedUser && !user) {
+      return NextResponse.json(
+        { success: false, message: "Authentication required for wallet payment." },
+        { status: 401 }
+      );
+    }
+
+    if (user) {
       if (body.userId && body.userId !== user.id) {
         return NextResponse.json(
-          { success: false, message: "Unauthorized wallet usage. User ID mismatch." },
+          { success: false, message: "Unauthorized user ID mismatch." },
           { status: 403 }
         );
       }
 
       body.userId = user.id;
+    } else {
+      if (body.userId) {
+        return NextResponse.json(
+          { success: false, message: "Guest checkout cannot submit a user ID." },
+          { status: 403 }
+        );
+      }
+
+      body.userId = null;
     }
 
     // For COD, enforce paymentStatus = 'pending'

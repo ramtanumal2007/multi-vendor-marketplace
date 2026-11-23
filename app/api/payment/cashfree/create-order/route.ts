@@ -1,6 +1,7 @@
 import crypto from "crypto";
-import { createAdminClient } from "@/lib/supabase";
+import { createAdminClient, createServerClient } from "@/lib/supabase";
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import {
   createCashfreeOrder,
   fetchCashfreeOrder,
@@ -20,9 +21,54 @@ export async function POST(req: Request) {
       cityRuleName,
       idempotencyKey,
       customerDetails = {},
-      userId,
+      userId: requestedUserId,
       email,
     } = body;
+
+    // Resolve authenticated identity from the verified Supabase session.
+    const cookieStore = cookies();
+
+    const supabaseUser = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) =>
+                cookieStore.set(name, value, options)
+              );
+            } catch {
+              // Cookie refresh may be unavailable in this context.
+            }
+          },
+        },
+      }
+    );
+
+    const {
+      data: { user: authUser },
+      error: authErr,
+    } = await supabaseUser.auth.getUser();
+
+    if (authErr && authErr.name !== "AuthSessionMissingError") {
+      return NextResponse.json(
+        { success: false, message: "Unable to verify your session." },
+        { status: 401 }
+      );
+    }
+
+    if (requestedUserId && (!authUser || requestedUserId !== authUser.id)) {
+      return NextResponse.json(
+        { success: false, message: "Authenticated user ID mismatch." },
+        { status: 403 }
+      );
+    }
+
+    const userId = authUser?.id ?? null;
 
     // A. Validate Cart Items
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -204,8 +250,8 @@ export async function POST(req: Request) {
         dbP.tax_rate !== null && dbP.tax_rate !== undefined
           ? Number(dbP.tax_rate)
           : catObj?.tax_rate !== null && catObj?.tax_rate !== undefined
-          ? Number(catObj.tax_rate)
-          : globalTaxRate;
+            ? Number(catObj.tax_rate)
+            : globalTaxRate;
 
       const hasDiscount = Boolean(dbP.sale_price && dbP.sale_price > 0 && dbP.sale_price < dbP.price);
       const effectivePrice = hasDiscount ? Number(dbP.sale_price) : Number(dbP.price);
@@ -513,7 +559,7 @@ export async function POST(req: Request) {
     const customerPhone = customerDetails.phone || shippingAddress?.phone || "9999999999";
     const customerName = customerDetails.name || customerDetails.fullName || shippingAddress?.full_name || "Customer";
     const customerEmail = customerDetails.email || email || shippingAddress?.email || "customer@store.com";
-    const customerId = customerDetails.customerId || userId || `CUS_${baseHash.slice(0, 12)}`;
+    const customerId = userId || `CUS_${baseHash.slice(0, 12)}`;
 
     const cfOrder = await createCashfreeOrder({
       orderId: cfOrderId,

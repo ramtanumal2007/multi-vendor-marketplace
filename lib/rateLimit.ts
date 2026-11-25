@@ -1,15 +1,84 @@
+import crypto from "crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 /**
- * Lightweight In-Memory Sliding-Window Rate Limiter
+ * Distributed & In-Memory Rate Limiting Architecture for VENDOSMITH
  * 
- * Provides per-process request throttling suitable for Node.js server runtimes.
+ * 1. Distributed Rate Limiter:
+ *    - Backed by persistent PostgreSQL table `public.rate_limit_counters`
+ *    - Executed atomically via `public.check_rate_limit(p_key_hash, p_bucket_type, p_max_hits, p_window_seconds)`
+ *    - Strict fail-closed behavior on database error (never silent bypass)
+ *    - Cryptographic SHA-256 pseudonymization (zero raw PII in database)
  * 
- * Architecture Note:
- * - Operates in-process memory with automatic cleanup of expired buckets.
- * - In distributed serverless clusters with multiple warm instances, rate-limit
- *   counters are tracked per instance. For cluster-wide coordination in high-scale
- *   environments, this interface can seamlessly be backed by Redis / Upstash.
+ * 2. In-Memory Fallback:
+ *    - Retained for non-distributed lightweight throttling where appropriate
  */
 
+export interface DistributedRateLimitResult {
+  success: boolean;
+  limit: number;
+  currentCount: number;
+  remaining: number;
+  resetAt: number; // Unix ms
+  retryAfter: number; // seconds
+}
+
+/**
+ * Deterministically pseudonymizes sensitive identifiers (IP, email)
+ * using SHA-256 with a domain prefix so raw PII is never stored or transmitted to DB.
+ */
+export function hashRateLimitKey(prefix: string, rawIdentifier: string): string {
+  const normalized = (rawIdentifier || "").trim().toLowerCase();
+  return crypto
+    .createHash("sha256")
+    .update(`${prefix}:${normalized}`)
+    .digest("hex");
+}
+
+/**
+ * Executes atomic distributed rate limiting against PostgreSQL via RPC.
+ * Fails closed if the database call errors or returns invalid data.
+ */
+export async function checkDistributedRateLimit(
+  adminClient: SupabaseClient,
+  options: {
+    keyHash: string;
+    bucketType: string;
+    maxHits: number;
+    windowSeconds: number;
+  }
+): Promise<DistributedRateLimitResult> {
+  const { data, error } = await adminClient.rpc("check_rate_limit", {
+    p_key_hash: options.keyHash,
+    p_bucket_type: options.bucketType,
+    p_max_hits: options.maxHits,
+    p_window_seconds: options.windowSeconds,
+  });
+
+  if (error || !data) {
+    // FAIL-CLOSED: throw so caller can fail closed and reject request
+    throw new Error(`[RATE_LIMIT_DB_ERROR] ${error?.message || "Null response from rate limit RPC"}`);
+  }
+
+  const allowed = Boolean(data.allowed);
+  const currentCount = Number(data.current_count) || 1;
+  const maxHits = Number(data.max_hits) || options.maxHits;
+  const resetAtMs = data.reset_at ? new Date(data.reset_at).getTime() : Date.now() + options.windowSeconds * 1000;
+  const retryAfter = Number(data.retry_after) || Math.max(0, Math.ceil((resetAtMs - Date.now()) / 1000));
+
+  return {
+    success: allowed,
+    limit: maxHits,
+    currentCount,
+    remaining: Math.max(0, maxHits - currentCount),
+    resetAt: resetAtMs,
+    retryAfter,
+  };
+}
+
+// --------------------------------------------------------------------------
+// In-Memory Rate Limiter (Process-Local)
+// --------------------------------------------------------------------------
 interface RateLimitRecord {
   count: number;
   resetAt: number;
@@ -17,7 +86,6 @@ interface RateLimitRecord {
 
 const memoryStore = new Map<string, RateLimitRecord>();
 
-// Periodic cleanup of expired records every 5 minutes to prevent memory leak
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 let lastCleanup = Date.now();
 
@@ -46,11 +114,7 @@ export interface RateLimitResult {
 }
 
 /**
- * Check and record a request against the rate limiter.
- * 
- * @param key Unique identifier (e.g. `seller-inv:${userId}` or `ip:${ipAddress}`)
- * @param options Rate limit window and request cap options
- * @returns RateLimitResult with pass/fail and remaining budget
+ * Check and record a request against the process-local in-memory rate limiter.
  */
 export function checkRateLimit(
   key: string,
@@ -65,7 +129,6 @@ export function checkRateLimit(
   const existing = memoryStore.get(key);
 
   if (!existing || existing.resetAt <= now) {
-    // New window
     const resetAt = now + windowMs;
     memoryStore.set(key, { count: 1, resetAt });
     return {
@@ -76,7 +139,6 @@ export function checkRateLimit(
     };
   }
 
-  // Existing window
   if (existing.count >= maxRequests) {
     return {
       success: false,

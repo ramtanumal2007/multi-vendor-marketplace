@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase";
 import { NextResponse } from "next/server";
 import { verifyCashfreeWebhookSignature } from "@/lib/cashfree";
 import { createOrderRecord } from "@/lib/order-service";
+import { notifyPaymentSuccessful, notifyPaymentFailed } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -686,6 +687,34 @@ export async function POST(req: Request) {
       }
       console.log(`Reconciled order ${targetOrder.order_number} to paid via Cashfree webhook.`);
 
+      // Non-fatal transactional email dispatch
+      (async () => {
+        try {
+          const { data: fullOrder } = await supabase
+            .from("orders")
+            .select("email, shipping_address")
+            .eq("id", targetOrder.id)
+            .single();
+
+          const targetEmail = fullOrder?.email || (fullOrder?.shipping_address as Record<string, unknown>)?.email as string;
+          const customerName = (fullOrder?.shipping_address as Record<string, unknown>)?.full_name as string || "Valued Customer";
+
+          if (targetEmail) {
+            await notifyPaymentSuccessful({
+              orderNumber: targetOrder.order_number,
+              customerEmail: targetEmail,
+              customerName,
+              paymentId: String(cfPaymentId || incomingPaymentRef || targetOrder.id),
+              amount: Number(targetOrder.total || paymentData.payment_amount || 0),
+              paymentMethod: String(paymentData.payment_group || "ONLINE"),
+              paidAt: paymentData.payment_time || new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+            });
+          }
+        } catch (emailErr) {
+          console.warn("[CashfreeWebhook] Payment success notification notice:", emailErr);
+        }
+      })();
+
       return NextResponse.json({ received: true, reconciled: true, orderId: targetOrder.id });
     }
 
@@ -704,6 +733,33 @@ export async function POST(req: Request) {
           return NextResponse.json({ error: "Payment failure status update failed. Please retry." }, { status: 503 });
         }
         console.log(`Order ${targetOrder.order_number} marked as failed via Cashfree webhook.`);
+
+        // Non-fatal payment failure email dispatch
+        (async () => {
+          try {
+            const { data: fullOrder } = await supabase
+              .from("orders")
+              .select("email, shipping_address")
+              .eq("id", targetOrder.id)
+              .single();
+
+            const targetEmail = fullOrder?.email || (fullOrder?.shipping_address as Record<string, unknown>)?.email as string;
+            const customerName = (fullOrder?.shipping_address as Record<string, unknown>)?.full_name as string || "Valued Customer";
+
+            if (targetEmail) {
+              await notifyPaymentFailed({
+                orderNumber: targetOrder.order_number,
+                customerEmail: targetEmail,
+                customerName,
+                amount: Number(targetOrder.total || paymentData.payment_amount || 0),
+                failureReason: paymentData.payment_message || "Transaction was not completed or declined by banking gateway.",
+                retryUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://vendosmith.com"}/checkout`,
+              });
+            }
+          } catch (emailErr) {
+            console.warn("[CashfreeWebhook] Payment failure notification notice:", emailErr);
+          }
+        })();
       }
       return NextResponse.json({ received: true, status: "failed", orderId: targetOrder.id });
     }

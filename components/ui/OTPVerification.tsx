@@ -8,7 +8,7 @@ import { Loader2, Mail, ArrowLeft, ShieldCheck } from "lucide-react";
 
 interface OTPVerificationProps {
   email: string;
-  type: "signup" | "email";
+  type: "signup" | "email" | "recovery";
   onVerified: () => void;
   onBack?: () => void;
   title?: string;
@@ -66,24 +66,32 @@ export function OTPVerification({
     const cleanEmail = email.trim();
     const cleanToken = code.trim();
 
-    // Verify 6-digit numeric OTP primarily with type: 'email'
-    // Do NOT use the component's signup type directly for the primary numeric OTP verification
-    let { error } = await supabase.auth.verifyOtp({
-      email: cleanEmail,
-      token: cleanToken,
-      type: "email",
-    });
+    let error: { message?: string } | null = null;
 
-    // Fallback: If type was signup and email verification failed, try signup fallback
-    if (error && type === "signup") {
-      const fallback = await supabase.auth.verifyOtp({
+    if (type === "signup") {
+      // Directly verify signup confirmation OTP without fallbacks
+      const res = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: cleanToken,
         type: "signup",
       });
-      if (!fallback.error) {
-        error = null;
-      }
+      error = res.error;
+    } else if (type === "recovery") {
+      // Directly verify password recovery OTP
+      const res = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanToken,
+        type: "recovery",
+      });
+      error = res.error;
+    } else {
+      // Directly verify email sign-in OTP
+      const res = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanToken,
+        type: "email",
+      });
+      error = res.error;
     }
 
     if (error) {
@@ -108,7 +116,10 @@ export function OTPVerification({
 
     const cleanEmail = email.trim();
 
-    if (type === "email") {
+    if (type === "recovery") {
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+      resendError = error;
+    } else if (type === "email") {
       const { error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: { shouldCreateUser: false }

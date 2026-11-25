@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient, createSupabaseAdminClient } from "@/lib/supabase";
 import { processAdminReturnRefund } from "@/lib/return-service";
+import { notifyRefundProcessed } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +75,39 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       processedAt,
       notes,
     });
+
+    if (result.success) {
+      // Non-fatal transactional email dispatch
+      (async () => {
+        try {
+          const { data: retReq } = await supabaseAdmin
+            .from("return_requests")
+            .select("id, return_number, customer_id, order_id, orders(order_number, email), profiles(email, full_name)")
+            .eq("id", params.id)
+            .single();
+
+          const targetEmail = (retReq?.orders as unknown as { email?: string })?.email || 
+                              (retReq?.profiles as unknown as { email?: string })?.email;
+          const customerName = (retReq?.profiles as unknown as { full_name?: string })?.full_name || "Valued Customer";
+          const orderNum = (retReq?.orders as unknown as { order_number?: string })?.order_number || 
+                           retReq?.return_number || params.id.slice(0, 8);
+
+          if (targetEmail) {
+            await notifyRefundProcessed({
+              orderNumber: orderNum,
+              customerEmail: targetEmail,
+              customerName,
+              refundAmount: result.refundAmount || Number(refundAmount || 0),
+              refundId: retReq?.return_number || params.id,
+              bankReference: paymentReference?.trim(),
+              processedAt,
+            });
+          }
+        } catch (emailErr) {
+          console.warn("[AdminRefund] Non-fatal notification notice:", emailErr);
+        }
+      })();
+    }
 
     return NextResponse.json(result, { status: result.status || (result.success ? 200 : 400) });
   } catch (err: unknown) {

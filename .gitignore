@@ -57,3 +57,8 @@ test_cashfree_integration.js
 app.before-next15-migration/
 
 !.env.example
+.test-cache/
+*.bak-*
+*.backup
+*.patch
+VENDOSMITH_pre_consolidated_untracked_backup/

@@ -9,7 +9,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, Lock, Mail, Store } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, Lock, Mail, Store } from "lucide-react";
 
 interface SellerAuthData {
   user?: {
@@ -26,11 +26,13 @@ function SellerLoginContent() {
   const [loginMethod, setLoginMethod] = useState<"password" | "otp">("password");
   const [showOTPVerification, setShowOTPVerification] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [isRecoveryOTP, setIsRecoveryOTP] = useState(false);
+  const [accountNotFound, setAccountNotFound] = useState(false);
+  const [incorrectCredentials, setIncorrectCredentials] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [resetSent, setResetSent] = useState(false);
 
   const supabase = createClient();
   const { addToast } = useToast();
@@ -122,6 +124,8 @@ function SellerLoginContent() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setAccountNotFound(false);
+    setIncorrectCredentials(false);
 
     const cleanEmail = email.trim();
 
@@ -132,11 +136,44 @@ function SellerLoginContent() {
       });
 
       if (authError) {
-        addToast({ title: "Authentication Failed", description: authError.message, type: "error" });
+        try {
+          const checkRes = await fetch("/api/auth/validate-login-account", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: cleanEmail, targetPortal: "seller" }),
+          });
+          const checkData = await checkRes.json();
+          if (!checkData.exists) {
+            setAccountNotFound(true);
+            setIncorrectCredentials(false);
+            addToast({
+              title: "Account Not Found",
+              description: "No account found with this email. Please create an account first.",
+              type: "error"
+            });
+          } else {
+            setAccountNotFound(false);
+            setIncorrectCredentials(true);
+            addToast({
+              title: "Authentication Failed",
+              description: "Incorrect email or password. Please try again.",
+              type: "error"
+            });
+          }
+        } catch {
+          setIncorrectCredentials(true);
+          addToast({
+            title: "Authentication Failed",
+            description: "Incorrect email or password. Please try again.",
+            type: "error"
+          });
+        }
         setIsLoading(false);
         return;
       }
 
+      setAccountNotFound(false);
+      setIncorrectCredentials(false);
       await routeSeller(authData.user!.id, authData);
     } else {
       // OTP Login Request
@@ -145,8 +182,29 @@ function SellerLoginContent() {
         options: { shouldCreateUser: false }
       });
       if (error) {
-        addToast({ title: "Error", description: error.message, type: "error" });
+        try {
+          const checkRes = await fetch("/api/auth/validate-login-account", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: cleanEmail, targetPortal: "seller" }),
+          });
+          const checkData = await checkRes.json();
+          if (!checkData.exists) {
+            setAccountNotFound(true);
+            addToast({
+              title: "Account Not Found",
+              description: "No account found with this email. Please create an account first.",
+              type: "error"
+            });
+          } else {
+            addToast({ title: "Error", description: error.message, type: "error" });
+          }
+        } catch {
+          addToast({ title: "Error", description: error.message, type: "error" });
+        }
       } else {
+        setAccountNotFound(false);
+        setIncorrectCredentials(false);
         setShowOTPVerification(true);
       }
     }
@@ -156,21 +214,47 @@ function SellerLoginContent() {
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
       addToast({ title: "Validation Error", description: "Please enter your seller account email address.", type: "error" });
       return;
     }
 
     setIsLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`
-    });
+    setAccountNotFound(false);
+
+    try {
+      const checkRes = await fetch("/api/auth/validate-login-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail, targetPortal: "seller" }),
+      });
+      const checkData = await checkRes.json();
+      if (!checkData.exists) {
+        setAccountNotFound(true);
+        addToast({
+          title: "Account Not Found",
+          description: "No account found with this email. Please create an account first.",
+          type: "error"
+        });
+        setIsLoading(false);
+        return;
+      }
+    } catch {
+      // Proceed
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
 
     if (error) {
       addToast({ title: "Password Reset Request Failed", description: error.message, type: "error" });
     } else {
-      setResetSent(true);
-      addToast({ title: "Reset Link Dispatched", description: "Check your email inbox for password recovery instructions.", type: "success" });
+      setIsRecoveryOTP(true);
+      addToast({
+        title: "Recovery Code Dispatched",
+        description: "A 6-digit recovery code has been sent to your seller email.",
+        type: "success"
+      });
     }
     setIsLoading(false);
   };
@@ -204,67 +288,92 @@ function SellerLoginContent() {
                 transition={{ duration: 0.2 }}
                 className="flex flex-col gap-6"
               >
-                <div className="text-center">
-                  <h1 className="text-2xl font-bold tracking-tight text-foreground mb-1.5">Reset Password</h1>
-                  <p className="text-xs sm:text-sm text-foreground-secondary">
-                    Enter your registered seller email address to receive password reset instructions.
-                  </p>
-                </div>
-
-                {resetSent ? (
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-foreground rounded-2xl p-6 text-center space-y-4">
-                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center mx-auto">
-                      <CheckCircle2 className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-sm sm:text-base">Check Your Email</h3>
-                      <p className="text-xs text-foreground-secondary mt-1">
-                        We sent password recovery instructions to <strong className="text-foreground">{email}</strong>.
+                {isRecoveryOTP ? (
+                  <OTPVerification
+                    email={email.trim()}
+                    type="recovery"
+                    onVerified={() => {
+                      addToast({
+                        title: "Code Verified 🎉",
+                        description: "Please enter your new password.",
+                        type: "success"
+                      });
+                      router.push("/reset-password");
+                    }}
+                    onBack={() => {
+                      setIsRecoveryOTP(false);
+                    }}
+                    title="Reset Seller Password"
+                    description="We've sent a 6-digit recovery code to your seller email. Enter it below to proceed."
+                  />
+                ) : (
+                  <>
+                    <div className="text-center">
+                      <h1 className="text-2xl font-bold tracking-tight text-foreground mb-1.5">Reset Password</h1>
+                      <p className="text-xs sm:text-sm text-foreground-secondary">
+                        Enter your registered seller email address to receive password reset instructions.
                       </p>
                     </div>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setIsForgotPassword(false);
-                        setResetSent(false);
-                      }}
-                      className="w-full text-xs font-semibold h-11 rounded-xl"
-                    >
-                      <ArrowLeft className="w-4 h-4 mr-2" /> Return to Seller Sign In
-                    </Button>
-                  </div>
-                ) : (
-                  <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
-                    <div>
-                      <label htmlFor="reset-seller-email" className="block text-xs font-semibold text-foreground mb-1.5">
-                        Seller Email Address <span className="text-destructive">*</span>
-                      </label>
-                      <div className="relative">
-                        <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-foreground-secondary/60" />
-                        <input
-                          id="reset-seller-email"
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="seller@example.com"
-                          required
-                          className="w-full h-11 sm:h-12 pl-10 pr-3.5 text-sm rounded-xl border border-border bg-background text-foreground focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-all placeholder:text-foreground-secondary/40"
-                        />
+
+                    {accountNotFound && (
+                      <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-foreground flex flex-col gap-2">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                          <p className="text-xs text-foreground font-medium">
+                            No account found with this email. Please create an account first.
+                          </p>
+                        </div>
+                        <Link href="/seller/register" className="self-start">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="text-xs font-semibold h-8 rounded-lg border-accent/30 text-accent hover:bg-accent/10"
+                          >
+                            Create Seller Account
+                          </Button>
+                        </Link>
                       </div>
-                    </div>
+                    )}
 
-                    <Button variant="primary" size="lg" type="submit" isLoading={isLoading} className="w-full h-11 sm:h-12 font-semibold text-sm rounded-xl mt-1">
-                      Send Reset Instructions
-                    </Button>
+                    <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
+                      <div>
+                        <label htmlFor="reset-seller-email" className="block text-xs font-semibold text-foreground mb-1.5">
+                          Seller Email Address <span className="text-destructive">*</span>
+                        </label>
+                        <div className="relative">
+                          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-foreground-secondary/60" />
+                          <input
+                            id="reset-seller-email"
+                            type="email"
+                            value={email}
+                            onChange={(e) => {
+                              setEmail(e.target.value);
+                              if (accountNotFound) setAccountNotFound(false);
+                            }}
+                            placeholder="seller@example.com"
+                            required
+                            className="w-full h-11 sm:h-12 pl-10 pr-3.5 text-sm rounded-xl border border-border bg-background text-foreground focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-all placeholder:text-foreground-secondary/40"
+                          />
+                        </div>
+                      </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setIsForgotPassword(false)}
-                      className="text-xs font-semibold text-foreground-secondary hover:text-foreground flex items-center justify-center gap-1.5 mt-2 transition-colors"
-                    >
-                      <ArrowLeft className="w-3.5 h-3.5" /> Back to Seller Sign In
-                    </button>
-                  </form>
+                      <Button variant="primary" size="lg" type="submit" isLoading={isLoading} className="w-full h-11 sm:h-12 font-semibold text-sm rounded-xl mt-1">
+                        Send Recovery Code
+                      </Button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsForgotPassword(false);
+                          setAccountNotFound(false);
+                        }}
+                        className="text-xs font-semibold text-foreground-secondary hover:text-foreground flex items-center justify-center gap-1.5 mt-2 transition-colors"
+                      >
+                        <ArrowLeft className="w-3.5 h-3.5" /> Back to Seller Sign In
+                      </button>
+                    </form>
+                  </>
                 )}
               </motion.div>
             </AnimatePresence>
@@ -312,6 +421,35 @@ function SellerLoginContent() {
               </div>
 
               <form onSubmit={handleLogin} className="flex flex-col gap-4">
+                {/* Account Not Found Banner */}
+                {accountNotFound && (
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-foreground flex flex-col gap-2">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                      <p className="text-xs text-foreground font-medium">
+                        No account found with this email. Please create an account first.
+                      </p>
+                    </div>
+                    <Link href="/seller/register" className="self-start">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-xs font-semibold h-8 rounded-lg border-accent/30 text-accent hover:bg-accent/10"
+                      >
+                        Create Seller Account
+                      </Button>
+                    </Link>
+                  </div>
+                )}
+
+                {/* Incorrect Credentials Banner */}
+                {incorrectCredentials && !accountNotFound && (
+                  <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs font-medium flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>Incorrect email or password. Please try again.</span>
+                  </div>
+                )}
                 {/* Method Toggle: Password vs OTP */}
                 <div className="flex justify-center gap-2 mb-1 p-1 bg-background-secondary/60 rounded-lg border border-border/50">
                   <button

@@ -8,13 +8,16 @@ import { OTPVerification } from "@/components/ui/OTPVerification";
 import { useToast } from "@/components/ui/Toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, Lock, Mail, User } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, Lock, Mail, User } from "lucide-react";
 
 function LoginContent() {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [isRecoveryOTP, setIsRecoveryOTP] = useState(false);
   const [loginMethod, setLoginMethod] = useState<"password" | "otp">("password");
   const [showOTPVerification, setShowOTPVerification] = useState(false);
+  const [accountNotFound, setAccountNotFound] = useState(false);
+  const [incorrectCredentials, setIncorrectCredentials] = useState(false);
 
   // Registration & Login Fields
   const [fullName, setFullName] = useState("");
@@ -27,7 +30,6 @@ function LoginContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [resetSent, setResetSent] = useState(false);
 
   const supabase = createClient();
   const { addToast } = useToast();
@@ -96,6 +98,8 @@ function LoginContent() {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setAccountNotFound(false);
+    setIncorrectCredentials(false);
 
     const cleanEmail = email.trim();
     const cleanPassword = password;
@@ -107,8 +111,42 @@ function LoginContent() {
           password: cleanPassword
         });
         if (error) {
-          addToast({ title: "Authentication Failed", description: error.message, type: "error" });
+          // Authoritatively verify if the account exists
+          try {
+            const checkRes = await fetch("/api/auth/validate-login-account", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email: cleanEmail, targetPortal: "customer" }),
+            });
+            const checkData = await checkRes.json();
+            if (!checkData.exists) {
+              setAccountNotFound(true);
+              setIncorrectCredentials(false);
+              addToast({
+                title: "Account Not Found",
+                description: "No account found with this email. Please create an account first.",
+                type: "error"
+              });
+            } else {
+              setAccountNotFound(false);
+              setIncorrectCredentials(true);
+              addToast({
+                title: "Authentication Failed",
+                description: "Incorrect email or password. Please try again.",
+                type: "error"
+              });
+            }
+          } catch {
+            setIncorrectCredentials(true);
+            addToast({
+              title: "Authentication Failed",
+              description: "Incorrect email or password. Please try again.",
+              type: "error"
+            });
+          }
         } else if (authData?.user) {
+          setAccountNotFound(false);
+          setIncorrectCredentials(false);
           await routeUser(authData.user.id);
         }
       } else {
@@ -118,8 +156,29 @@ function LoginContent() {
           options: { shouldCreateUser: false }
         });
         if (error) {
-          addToast({ title: "Error", description: error.message, type: "error" });
+          try {
+            const checkRes = await fetch("/api/auth/validate-login-account", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email: cleanEmail, targetPortal: "customer" }),
+            });
+            const checkData = await checkRes.json();
+            if (!checkData.exists) {
+              setAccountNotFound(true);
+              addToast({
+                title: "Account Not Found",
+                description: "No account found with this email. Please create an account first.",
+                type: "error"
+              });
+            } else {
+              addToast({ title: "Error", description: error.message, type: "error" });
+            }
+          } catch {
+            addToast({ title: "Error", description: error.message, type: "error" });
+          }
         } else {
+          setAccountNotFound(false);
+          setIncorrectCredentials(false);
           setShowOTPVerification(true);
         }
       }
@@ -223,21 +282,48 @@ function LoginContent() {
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
       addToast({ title: "Validation Error", description: "Please enter your registered email address.", type: "error" });
       return;
     }
 
     setIsLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`
-    });
+    setAccountNotFound(false);
+
+    // Verify account exists before requesting recovery
+    try {
+      const checkRes = await fetch("/api/auth/validate-login-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail, targetPortal: "customer" }),
+      });
+      const checkData = await checkRes.json();
+      if (!checkData.exists) {
+        setAccountNotFound(true);
+        addToast({
+          title: "Account Not Found",
+          description: "No account found with this email. Please create an account first.",
+          type: "error"
+        });
+        setIsLoading(false);
+        return;
+      }
+    } catch {
+      // Proceed to Supabase call
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
 
     if (error) {
       addToast({ title: "Password Reset Request Failed", description: error.message, type: "error" });
     } else {
-      setResetSent(true);
-      addToast({ title: "Reset Link Dispatched", description: "Check your email inbox for password recovery instructions.", type: "success" });
+      setIsRecoveryOTP(true);
+      addToast({
+        title: "Recovery Code Dispatched",
+        description: "A 6-digit recovery code has been sent to your email.",
+        type: "success"
+      });
     }
     setIsLoading(false);
   };
@@ -275,68 +361,95 @@ function LoginContent() {
                 transition={{ duration: 0.2 }}
                 className="flex flex-col gap-6"
               >
-                <div className="text-center">
-                  <h1 className="text-2xl font-bold tracking-tight text-foreground mb-1.5">Reset Password</h1>
-                  <p className="text-xs sm:text-sm text-foreground-secondary">
-                    Enter your registered email address and we will send you password reset instructions.
-                  </p>
-                </div>
-
-                {resetSent ? (
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-foreground rounded-2xl p-6 text-center space-y-4">
-                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center mx-auto">
-                      <CheckCircle2 className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-sm sm:text-base">Check Your Email</h3>
-                      <p className="text-xs text-foreground-secondary mt-1">
-                        We sent password recovery instructions to <strong className="text-foreground">{email}</strong>.
+                {isRecoveryOTP ? (
+                  <OTPVerification
+                    email={email.trim()}
+                    type="recovery"
+                    onVerified={() => {
+                      addToast({
+                        title: "Code Verified 🎉",
+                        description: "Please enter your new password.",
+                        type: "success"
+                      });
+                      router.push("/reset-password");
+                    }}
+                    onBack={() => {
+                      setIsRecoveryOTP(false);
+                    }}
+                    title="Reset Your Password"
+                    description="We've sent a 6-digit recovery code to your email. Enter it below to proceed."
+                  />
+                ) : (
+                  <>
+                    <div className="text-center">
+                      <h1 className="text-2xl font-bold tracking-tight text-foreground mb-1.5">Reset Password</h1>
+                      <p className="text-xs sm:text-sm text-foreground-secondary">
+                        Enter your registered email address and we will send you a 6-digit password recovery code.
                       </p>
                     </div>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setIsForgotPassword(false);
-                        setResetSent(false);
-                        setIsLogin(true);
-                      }}
-                      className="w-full text-xs font-semibold h-11 rounded-xl"
-                    >
-                      <ArrowLeft className="w-4 h-4 mr-2" /> Return to Sign In
-                    </Button>
-                  </div>
-                ) : (
-                  <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
-                    <div>
-                      <label htmlFor="reset-email" className="block text-xs font-semibold text-foreground mb-1.5">
-                        Email Address <span className="text-destructive">*</span>
-                      </label>
-                      <div className="relative">
-                        <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-foreground-secondary/60" />
-                        <input
-                          id="reset-email"
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="you@example.com"
-                          required
-                          className="w-full h-11 sm:h-12 pl-10 pr-3.5 text-sm rounded-xl border border-border bg-background text-foreground focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-all placeholder:text-foreground-secondary/40"
-                        />
+
+                    {accountNotFound && (
+                      <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-foreground flex flex-col gap-2">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                          <p className="text-xs text-foreground font-medium">
+                            No account found with this email. Please create an account first.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setIsForgotPassword(false);
+                            setIsLogin(false);
+                            setAccountNotFound(false);
+                          }}
+                          className="text-xs font-semibold h-8 rounded-lg self-start border-amber-500/30 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400"
+                        >
+                          Create Customer Account
+                        </Button>
                       </div>
-                    </div>
+                    )}
 
-                    <Button variant="primary" size="lg" type="submit" isLoading={isLoading} className="w-full h-11 sm:h-12 font-semibold text-sm rounded-xl mt-1">
-                      Send Reset Instructions
-                    </Button>
+                    <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
+                      <div>
+                        <label htmlFor="reset-email" className="block text-xs font-semibold text-foreground mb-1.5">
+                          Email Address <span className="text-destructive">*</span>
+                        </label>
+                        <div className="relative">
+                          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-foreground-secondary/60" />
+                          <input
+                            id="reset-email"
+                            type="email"
+                            value={email}
+                            onChange={(e) => {
+                              setEmail(e.target.value);
+                              if (accountNotFound) setAccountNotFound(false);
+                            }}
+                            placeholder="you@example.com"
+                            required
+                            className="w-full h-11 sm:h-12 pl-10 pr-3.5 text-sm rounded-xl border border-border bg-background text-foreground focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-all placeholder:text-foreground-secondary/40"
+                          />
+                        </div>
+                      </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setIsForgotPassword(false)}
-                      className="text-xs font-semibold text-foreground-secondary hover:text-foreground flex items-center justify-center gap-1.5 mt-2 transition-colors"
-                    >
-                      <ArrowLeft className="w-3.5 h-3.5" /> Back to Sign In
-                    </button>
-                  </form>
+                      <Button variant="primary" size="lg" type="submit" isLoading={isLoading} className="w-full h-11 sm:h-12 font-semibold text-sm rounded-xl mt-1">
+                        Send Recovery Code
+                      </Button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsForgotPassword(false);
+                          setAccountNotFound(false);
+                        }}
+                        className="text-xs font-semibold text-foreground-secondary hover:text-foreground flex items-center justify-center gap-1.5 mt-2 transition-colors"
+                      >
+                        <ArrowLeft className="w-3.5 h-3.5" /> Back to Sign In
+                      </button>
+                    </form>
+                  </>
                 )}
               </motion.div>
             </AnimatePresence>
@@ -364,7 +477,12 @@ function LoginContent() {
               <div className="grid grid-cols-2 p-1 bg-background-secondary rounded-xl mb-6 border border-border">
                 <button
                   type="button"
-                  onClick={() => { setIsLogin(true); setLoginMethod("password"); }}
+                  onClick={() => {
+                    setIsLogin(true);
+                    setLoginMethod("password");
+                    setAccountNotFound(false);
+                    setIncorrectCredentials(false);
+                  }}
                   className={`py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
                     isLogin
                       ? "bg-card text-foreground shadow-sm"
@@ -375,7 +493,11 @@ function LoginContent() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsLogin(false)}
+                  onClick={() => {
+                    setIsLogin(false);
+                    setAccountNotFound(false);
+                    setIncorrectCredentials(false);
+                  }}
                   className={`py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
                     !isLogin
                       ? "bg-card text-foreground shadow-sm"
@@ -409,6 +531,38 @@ function LoginContent() {
                   onSubmit={handleAuth}
                   className="flex flex-col gap-4"
                 >
+                  {/* Account Not Found Banner */}
+                  {isLogin && accountNotFound && (
+                    <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-foreground flex flex-col gap-2">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                        <p className="text-xs text-foreground font-medium">
+                          No account found with this email. Please create an account first.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setIsLogin(false);
+                          setAccountNotFound(false);
+                          setIncorrectCredentials(false);
+                        }}
+                        className="text-xs font-semibold h-8 rounded-lg self-start border-amber-500/30 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400"
+                      >
+                        Create Customer Account
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Incorrect Credentials Banner */}
+                  {isLogin && incorrectCredentials && !accountNotFound && (
+                    <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs font-medium flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>Incorrect email or password. Please try again.</span>
+                    </div>
+                  )}
                   {/* Login Method Toggle: Password vs OTP */}
                   {isLogin && (
                     <div className="flex justify-center gap-2 mb-1 p-1 bg-background-secondary/60 rounded-lg border border-border/50">

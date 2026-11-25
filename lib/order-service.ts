@@ -1,6 +1,7 @@
 import { createAdminClient, type SupabaseClient } from "@/lib/supabase";
 import { withDbRetry } from "./db-retry";
 import { debitCustomerWallet, getOrCreateCustomerWallet, validateMonetaryAmount } from "./wallet-service";
+import { notifyOrderConfirmed } from "@/lib/email";
 
 export interface RestoreStockResult {
   success: boolean;
@@ -1363,6 +1364,49 @@ export async function createOrderRecord(params: CreateOrderParams): Promise<Crea
     if (userId && shippingAddress) {
       await autoSaveFirstOrderAddress(supabase, userId, shippingAddress);
     }
+
+    if (!rpcData.is_duplicate) {
+      // Non-fatal transactional email dispatch for customer
+      (async () => {
+        try {
+          const customerEmail = email || (shippingAddress as Record<string, unknown>)?.email as string;
+          const customerName = (shippingAddress as Record<string, unknown>)?.full_name as string || "Valued Customer";
+          const orderNum = rpcData.order_number || String(rpcData.order_id);
+
+          if (customerEmail) {
+            const formattedItems = (items || []).map((it) => ({
+              title: it.title,
+              quantity: Number(it.quantity || 1),
+              price: Number(it.price || 0),
+              total: Number(it.price || 0) * Number(it.quantity || 1),
+            }));
+
+            await notifyOrderConfirmed({
+              orderNumber: orderNum,
+              customerEmail,
+              customerName,
+              items: formattedItems,
+              subtotal: Number(rpcData.order?.subtotal || 0),
+              shippingCost: Number(shippingCost || 0),
+              discount: Number(rpcData.order?.discount || 0),
+              totalAmount: Number(rpcData.order?.total || 0),
+              shippingAddress: {
+                fullName: customerName,
+                addressLine1: (shippingAddress as Record<string, unknown>)?.address_line1 as string,
+                city: (shippingAddress as Record<string, unknown>)?.city as string,
+                state: (shippingAddress as Record<string, unknown>)?.state as string,
+                postalCode: (shippingAddress as Record<string, unknown>)?.postal_code as string,
+                phone: (shippingAddress as Record<string, unknown>)?.phone as string,
+              },
+              estimatedDeliveryDate: rpcData.order?.estimated_delivery_date || null,
+            });
+          }
+        } catch (emailErr) {
+          console.warn("[OrderService] Non-fatal order confirmation email notice:", emailErr);
+        }
+      })();
+    }
+
     return {
       success: true,
       order: rpcData.order,

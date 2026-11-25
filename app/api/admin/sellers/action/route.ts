@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient, createSupabaseAdminClient } from "@/lib/supabase";
+import { notifySellerApproved } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -299,6 +300,16 @@ export async function POST(req: Request) {
           priority: "high",
           link_url: "/seller",
         });
+      }
+
+      // 6. Dispatch transactional email via Mailjet (non-fatal)
+      if (seller.business_email) {
+        notifySellerApproved({
+          sellerEmail: seller.business_email,
+          sellerName: seller.contact_name || seller.business_name || "Merchant Partner",
+          businessName: seller.business_name || "Official Store",
+          sellerIdCode: seller.seller_id_code || undefined,
+        }).catch((e) => console.warn("[AdminSellerAction] Email notify notice:", e));
       }
     } else if (action === "return_for_correction") {
       newStatus = "correction_required";

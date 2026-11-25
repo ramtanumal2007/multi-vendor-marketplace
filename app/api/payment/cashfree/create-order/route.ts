@@ -97,7 +97,7 @@ export async function POST(req: Request) {
     const productIds = items.map((i: { productId?: string }) => i.productId).filter(Boolean);
     const { data: dbProducts, error: dbProdErr } = await supabase
       .from("products")
-      .select("id, title, price, sale_price, stock_quantity, track_inventory, allow_backorders, store_id, category_id, tax_rate, categories(tax_rate)")
+      .select("id, title, price, sale_price, stock_quantity, track_inventory, allow_backorders, store_id, category_id, tax_rate, categories:categories!products_category_id_fkey(tax_rate)")
       .in("id", productIds);
 
     if (dbProdErr || !dbProducts) {

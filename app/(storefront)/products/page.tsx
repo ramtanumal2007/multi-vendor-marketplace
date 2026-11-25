@@ -168,7 +168,7 @@ export default function ProductListingPage() {
 
   const fetchProducts = useCallback(async () => {
     setIsLoading(true);
-    let query = supabase.from("products").select("*, product_images(*), stores(id, name)").eq("status", "active");
+    let query = supabase.from("products").select("*, product_images(*), stores:stores!products_store_id_fkey(id, name)").eq("status", "active");
 
     if (storeQuery.trim()) {
       const sId = storeQuery.trim();

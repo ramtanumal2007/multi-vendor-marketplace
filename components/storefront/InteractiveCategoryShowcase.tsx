@@ -2572,7 +2572,7 @@ export function InteractiveCategoryShowcase({
           supabase
             .from("products")
             .select(
-              "id, title, slug, price, sale_price, stock_quantity, category_id, tags, product_images(image_url), categories(id, name, slug, parent_id)"
+              "id, title, slug, price, sale_price, stock_quantity, category_id, tags, product_images(image_url), categories:categories!products_category_id_fkey(id, name, slug, parent_id)"
             )
             .eq("status", "active")
             .order("created_at", { ascending: false }),

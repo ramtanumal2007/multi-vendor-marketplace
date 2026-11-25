@@ -245,7 +245,7 @@ export default function Homepage() {
         configRes
       ] = await Promise.all([
         supabase.from("hero_slides").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
-        supabase.from("products").select("*, product_images(image_url), categories(id, name, slug), stores(id, name)").eq("status", "active").order("created_at", { ascending: false }).limit(40),
+        supabase.from("products").select("*, product_images(image_url), categories:categories!products_category_id_fkey(id, name, slug), stores:stores!products_store_id_fkey(id, name)").eq("status", "active").order("created_at", { ascending: false }).limit(40),
         supabase.from("page_seo").select("meta_description").eq("page_slug", "homepage_config").single()
       ]);
 

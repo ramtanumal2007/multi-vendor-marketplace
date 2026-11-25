@@ -786,7 +786,7 @@ export default function CheckoutPage() {
           const productIds = items.map((i) => i.productId);
           const { data: prodsData } = await supabase
             .from("products")
-            .select("id, tax_rate, delivery_fee, category_id, categories(tax_rate)")
+            .select("id, tax_rate, delivery_fee, category_id, categories:categories!products_category_id_fkey(tax_rate)")
             .in("id", productIds);
 
           const taxMap = new Map<string, number>();

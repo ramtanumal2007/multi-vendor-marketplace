@@ -201,7 +201,7 @@ export default function CategoryPage({ params }: { params: { slug: string } }) {
         // Fetch products for listing with store attribution
         let query = supabase
           .from("products")
-          .select("*, product_images(image_url), stores(id, name)")
+          .select("*, product_images(image_url), stores:stores!products_store_id_fkey(id, name)")
           .eq("status", "active");
 
         // Filter by subcategory if selected

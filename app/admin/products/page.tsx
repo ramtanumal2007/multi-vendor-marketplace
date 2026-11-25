@@ -159,7 +159,7 @@ export default function AdminProductsPage() {
     setIsLoading(true);
     const { data: productsData, error: prodError } = await supabase
       .from("products")
-      .select("*, categories(id, name), product_images(id, image_url), stores(id, name, seller_id)")
+      .select("*, categories:categories!products_category_id_fkey(id, name), product_images(id, image_url), stores:stores!products_store_id_fkey(id, name, seller_id)")
       .order("created_at", { ascending: false });
 
     if (prodError) {

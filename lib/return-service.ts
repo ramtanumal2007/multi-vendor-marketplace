@@ -624,7 +624,7 @@ export async function createReturnRequestServer(
     const candidateProductIds = Array.from(new Set(replItems.map((it) => it.productId)));
     const { data: dbCandidateProducts, error: candErr } = await supabaseAdmin
       .from("products")
-      .select("*, categories (id, name, slug)")
+      .select("*, categories:categories!products_category_id_fkey(id, name, slug)")
       .in("id", candidateProductIds)
       .eq("status", "active");
 

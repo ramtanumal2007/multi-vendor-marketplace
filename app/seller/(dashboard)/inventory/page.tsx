@@ -66,7 +66,7 @@ export default function SellerInventoryPage() {
 
       const { data, error } = await supabase
         .from("products")
-        .select("id, title, sku, price, sale_price, stock_quantity, status, updated_at, created_at, product_images(image_url), categories(name)")
+        .select("id, title, sku, price, sale_price, stock_quantity, status, updated_at, created_at, product_images(image_url), categories:categories!products_category_id_fkey(name)")
         .eq("store_id", store.id)
         .order("stock_quantity", { ascending: true });
 

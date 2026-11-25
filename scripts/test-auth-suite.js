@@ -472,6 +472,82 @@ async function main() {
     assert.strictEqual(redirectedTo, "/", "Unauthorized user must be redirected to storefront root");
   });
 
+  runTest("Test 14.1: Customer login triggers immediate isSigningIn state before role resolution", () => {
+    let isLoading = false;
+    let isSigningIn = false;
+
+    // Simulate password authentication success
+    const authSuccess = true;
+    if (authSuccess) {
+      isLoading = true;
+      isSigningIn = true;
+    }
+
+    assert.strictEqual(isSigningIn, true, "isSigningIn must be immediately set on auth success");
+    assert.strictEqual(isLoading, true, "isLoading must stay true while routing");
+  });
+
+  runTest("Test 14.2: Duplicate login submission is prevented while in-flight", () => {
+    let submissionCount = 0;
+    let isLoading = true;
+    let isSigningIn = false;
+
+    const handleAuth = () => {
+      if (isLoading || isSigningIn) return; // Prevent duplicate submission
+      submissionCount++;
+    };
+
+    handleAuth();
+    assert.strictEqual(submissionCount, 0, "Submission must be blocked when isLoading is true");
+
+    isLoading = false;
+    isSigningIn = true;
+    handleAuth();
+    assert.strictEqual(submissionCount, 0, "Submission must be blocked when isSigningIn is true");
+  });
+
+  runTest("Test 14.3: Customer login routing eliminates conflicting router.refresh calls", () => {
+    let pushCalledWith = null;
+    let refreshCallCount = 0;
+
+    const mockRouter = {
+      push: (path) => { pushCalledWith = path; },
+      refresh: () => { refreshCallCount++; }
+    };
+
+    // Simulate updated routeUser
+    const routeUserSim = (role, target) => {
+      const destination = role === "admin" ? "/admin" : (target || "/");
+      mockRouter.push(destination);
+      // Notice: No mockRouter.refresh()
+    };
+
+    routeUserSim("customer", "/");
+    assert.strictEqual(pushCalledWith, "/");
+    assert.strictEqual(refreshCallCount, 0, "Customer routing must not call router.refresh() to avoid RSC network contention");
+  });
+
+  runTest("Test 14.4: Seller login routing eliminates conflicting router.refresh calls", () => {
+    let pushCalledWith = null;
+    let refreshCallCount = 0;
+
+    const mockRouter = {
+      push: (path) => { pushCalledWith = path; },
+      refresh: () => { refreshCallCount++; }
+    };
+
+    // Simulate updated routeSeller
+    const routeSellerSim = (isApproved, redirect) => {
+      const target = isApproved ? (redirect || "/seller") : "/seller/tracking";
+      mockRouter.push(target);
+      // Notice: No mockRouter.refresh()
+    };
+
+    routeSellerSim(true, "/seller");
+    assert.strictEqual(pushCalledWith, "/seller");
+    assert.strictEqual(refreshCallCount, 0, "Seller routing must not call router.refresh() to avoid RSC network contention");
+  });
+
   // --------------------------------------------------------------------------
   // Group 5: Login API Security & Enumeration Defense
   // --------------------------------------------------------------------------

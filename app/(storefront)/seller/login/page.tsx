@@ -9,7 +9,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
-import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, Lock, Mail, Store } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, Loader2, Lock, Mail, Store } from "lucide-react";
 
 interface SellerAuthData {
   user?: {
@@ -33,6 +33,7 @@ function SellerLoginContent() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   const supabase = createClient();
   const { addToast } = useToast();
@@ -41,81 +42,83 @@ function SellerLoginContent() {
   const redirect = searchParams.get("redirect") || "/seller";
 
   const routeSeller = async (userId: string, authData: SellerAuthData | null = null) => {
-    // Check profile role and seller profile
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", userId)
-      .single();
+    try {
+      // Check profile role and seller profile
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", userId)
+        .maybeSingle();
 
-    if (profile?.role === "admin") {
-      addToast({ title: "Welcome Admin", description: "Redirecting to admin dashboard.", type: "success" });
-      router.push("/admin");
-      router.refresh();
-      return;
-    }
-
-    const { data: sellerProfile } = await supabase
-      .from("seller_profiles")
-      .select("verification_status")
-      .eq("id", userId)
-      .single();
-
-    if (!sellerProfile) {
-      const isSellerReg = authData?.user?.user_metadata?.is_seller_registration;
-
-      if (isSellerReg) {
-          const meta = authData?.user?.user_metadata || {};
-          const { error: insertError } = await supabase.from("seller_profiles").insert({
-            id: userId,
-            business_name: meta.store_name || "New Store",
-            contact_name: meta.full_name || "Contact",
-            phone: meta.phone || "",
-            business_email: email.trim(),
-            business_type: "retail",
-            verification_status: "pending"
-          });
-
-         if (!insertError) {
-           addToast({ title: "Welcome!", description: "Your seller profile is created and pending approval.", type: "success" });
-           router.push("/seller/onboarding");
-           router.refresh();
-           return;
-         }
+      if (profile?.role === "admin") {
+        addToast({ title: "Welcome Admin", description: "Redirecting to admin dashboard.", type: "success" });
+        router.push("/admin");
+        return;
       }
 
-      // Normal customer without seller account
-      addToast({ title: "Apply as Seller", description: "Redirecting to Seller Application form.", type: "info" });
-      router.push("/seller/onboarding");
-      router.refresh();
-      return;
-    }
+      const { data: sellerProfile } = await supabase
+        .from("seller_profiles")
+        .select("verification_status")
+        .eq("id", userId)
+        .maybeSingle();
 
-    const isApproved = sellerProfile?.verification_status === "approved";
+      if (!sellerProfile) {
+        const isSellerReg = authData?.user?.user_metadata?.is_seller_registration;
 
-    if (isApproved) {
-      addToast({ title: "Welcome back!", description: "Opening your Seller Hub.", type: "success" });
-      const targetRedirect = redirect && redirect !== "/seller/login" && redirect !== "/seller/onboarding"
-        ? redirect
-        : "/seller";
-      router.push(targetRedirect);
-      router.refresh();
-    } else {
-      addToast({
-        title: "Application Pending",
-        description: `Your seller application is currently ${sellerProfile.verification_status || "under review"}.`,
-        type: "info"
-      });
-      router.push("/seller/tracking");
-      router.refresh();
+        if (isSellerReg) {
+            const meta = authData?.user?.user_metadata || {};
+            const { error: insertError } = await supabase.from("seller_profiles").insert({
+              id: userId,
+              business_name: meta.store_name || "New Store",
+              contact_name: meta.full_name || "Contact",
+              phone: meta.phone || "",
+              business_email: email.trim(),
+              business_type: "retail",
+              verification_status: "pending"
+            });
+
+           if (!insertError) {
+             addToast({ title: "Welcome!", description: "Your seller profile is created and pending approval.", type: "success" });
+             router.push("/seller/onboarding");
+             return;
+           }
+        }
+
+        // Normal customer without seller account
+        addToast({ title: "Apply as Seller", description: "Redirecting to Seller Application form.", type: "info" });
+        router.push("/seller/onboarding");
+        return;
+      }
+
+      const isApproved = sellerProfile?.verification_status === "approved";
+
+      if (isApproved) {
+        addToast({ title: "Welcome back!", description: "Opening your Seller Hub.", type: "success" });
+        const targetRedirect = redirect && redirect !== "/seller/login" && redirect !== "/seller/onboarding"
+          ? redirect
+          : "/seller";
+        router.push(targetRedirect);
+      } else {
+        addToast({
+          title: "Application Pending",
+          description: `Your seller application is currently ${sellerProfile.verification_status || "under review"}.`,
+          type: "info"
+        });
+        router.push("/seller/tracking");
+      }
+    } catch (err) {
+      console.error("Seller routing error:", err);
+      router.push("/seller");
     }
   };
 
   const handleVerified = async () => {
+    setIsSigningIn(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       await routeSeller(user.id);
     } else {
+      setIsSigningIn(false);
       addToast({ title: "Error", description: "Failed to establish session after verification.", type: "error" });
       setShowOTPVerification(false);
     }
@@ -123,6 +126,8 @@ function SellerLoginContent() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading || isSigningIn) return; // Prevent duplicate login submissions
+
     setIsLoading(true);
     setAccountNotFound(false);
     setIncorrectCredentials(false);
@@ -136,6 +141,8 @@ function SellerLoginContent() {
       });
 
       if (authError) {
+        setIsLoading(false);
+        setIsSigningIn(false);
         try {
           const checkRes = await fetch("/api/auth/validate-login-account", {
             method: "POST",
@@ -168,12 +175,12 @@ function SellerLoginContent() {
             type: "error"
           });
         }
-        setIsLoading(false);
         return;
       }
 
       setAccountNotFound(false);
       setIncorrectCredentials(false);
+      setIsSigningIn(true);
       await routeSeller(authData.user!.id, authData);
     } else {
       // OTP Login Request
@@ -258,6 +265,40 @@ function SellerLoginContent() {
     }
     setIsLoading(false);
   };
+
+  // Immediate full-page signing-in state while role authorization & navigation completes
+  if (isSigningIn) {
+    return (
+      <div className="flex-1 flex items-center justify-center py-10 sm:py-16 px-4 sm:px-6 w-full">
+        <div className="w-full max-w-[420px] mx-auto text-center">
+          <div className="text-center mb-6">
+            <Link href="/" className="inline-block focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-lg">
+              <span className="text-2xl sm:text-3xl font-black tracking-wider text-foreground font-sans">
+                VENDO<span className="text-accent">SMITH</span>
+              </span>
+            </Link>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent text-xs font-semibold mt-2.5">
+              <Store className="w-3.5 h-3.5" />
+              <span>Seller Hub</span>
+            </div>
+          </div>
+          <div className="bg-card border border-border rounded-2xl p-8 shadow-sm flex flex-col items-center gap-5">
+            <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
+              <Loader2 className="w-7 h-7 animate-spin" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold tracking-tight text-foreground mb-1.5">
+                Signing you in to Seller Hub...
+              </h2>
+              <p className="text-xs sm:text-sm text-foreground-secondary leading-relaxed">
+                Verifying your seller credentials and opening your dashboard...
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex items-center justify-center py-10 sm:py-16 px-4 sm:px-6 w-full">

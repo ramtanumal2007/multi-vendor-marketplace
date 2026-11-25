@@ -8,12 +8,13 @@ import { OTPVerification } from "@/components/ui/OTPVerification";
 import { useToast } from "@/components/ui/Toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, Lock, Mail, User } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, Loader2, Lock, Mail, User } from "lucide-react";
 
 function LoginContent() {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isRecoveryOTP, setIsRecoveryOTP] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [loginMethod, setLoginMethod] = useState<"password" | "otp">("password");
   const [showOTPVerification, setShowOTPVerification] = useState(false);
   const [accountNotFound, setAccountNotFound] = useState(false);
@@ -39,27 +40,39 @@ function LoginContent() {
   const redirect = rawRedirect.startsWith("/") ? rawRedirect : `/${rawRedirect}`;
 
   const routeUser = async (userId: string) => {
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", userId).single();
+    let role = "customer";
+    try {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profile?.role) {
+        role = profile.role;
+      }
+    } catch (err) {
+      console.error("[login routeUser error]:", err);
+    }
 
     if (redirect === "/admin") {
-      if (profile?.role === "admin") {
+      if (role === "admin") {
         addToast({ title: "Welcome Admin!", type: "success" });
         router.push("/admin");
-        router.refresh();
       } else {
+        setIsSigningIn(false);
+        setIsLoading(false);
         addToast({ title: "Access Denied", description: "You do not have admin privileges.", type: "error" });
         await supabase.auth.signOut();
         router.push("/");
-        router.refresh();
       }
       return;
     }
 
     addToast({ title: "Welcome back!", type: "success" });
 
-    if (profile?.role === "admin") {
+    if (role === "admin") {
       router.push("/admin");
-      router.refresh();
       return;
     }
 
@@ -70,10 +83,10 @@ function LoginContent() {
       : redirect;
 
     router.push(targetRedirect);
-    router.refresh();
   };
 
   const handleVerified = async () => {
+    setIsSigningIn(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       // Ensure customer profile is updated idempotently with full_name & phone
@@ -90,6 +103,7 @@ function LoginContent() {
 
       await routeUser(user.id);
     } else {
+      setIsSigningIn(false);
       addToast({ title: "Error", description: "Failed to establish session after verification.", type: "error" });
       setShowOTPVerification(false);
     }
@@ -97,6 +111,8 @@ function LoginContent() {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading || isSigningIn) return; // Prevent duplicate login submissions
+
     setIsLoading(true);
     setAccountNotFound(false);
     setIncorrectCredentials(false);
@@ -111,6 +127,8 @@ function LoginContent() {
           password: cleanPassword
         });
         if (error) {
+          setIsLoading(false);
+          setIsSigningIn(false);
           // Authoritatively verify if the account exists
           try {
             const checkRes = await fetch("/api/auth/validate-login-account", {
@@ -145,6 +163,8 @@ function LoginContent() {
             });
           }
         } else if (authData?.user) {
+          // Immediately display professional signing-in overlay
+          setIsSigningIn(true);
           setAccountNotFound(false);
           setIncorrectCredentials(false);
           await routeUser(authData.user.id);
@@ -334,6 +354,36 @@ function LoginContent() {
       options: { redirectTo: `${window.location.origin}/auth/callback` }
     });
   };
+
+  // Immediate full-page signing-in state while role authorization & navigation completes
+  if (isSigningIn) {
+    return (
+      <div className="flex-1 flex items-center justify-center py-10 sm:py-16 px-4 sm:px-6 w-full">
+        <div className="w-full max-w-[420px] mx-auto text-center">
+          <div className="text-center mb-6">
+            <Link href="/" className="inline-block focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-lg">
+              <span className="text-2xl sm:text-3xl font-black tracking-wider text-foreground font-sans">
+                VENDO<span className="text-accent">SMITH</span>
+              </span>
+            </Link>
+          </div>
+          <div className="bg-card border border-border rounded-2xl p-8 shadow-sm flex flex-col items-center gap-5">
+            <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
+              <Loader2 className="w-7 h-7 animate-spin" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold tracking-tight text-foreground mb-1.5">
+                Signing you in...
+              </h2>
+              <p className="text-xs sm:text-sm text-foreground-secondary leading-relaxed">
+                Verifying your account and preparing your store...
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex items-center justify-center py-10 sm:py-16 px-4 sm:px-6 w-full">

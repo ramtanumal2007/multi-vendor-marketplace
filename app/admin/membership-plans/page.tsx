@@ -66,6 +66,11 @@ export default async function AdminMembershipPlansPage() {
       tcs_rate,
       tds_rate,
       platform_absorbs_coupons,
+      gst_enabled,
+      tcs_enabled,
+      tds_enabled,
+      fixed_platform_fee_paise,
+      fixed_platform_fee_enabled,
       created_at,
       updated_at,
       updated_by,
@@ -156,11 +161,31 @@ export default async function AdminMembershipPlansPage() {
     },
   ];
 
+  const { data: auditLogs } = await supabaseAdmin
+    .from("finance_audit_logs")
+    .select(`
+      id,
+      actor_id,
+      action_type,
+      target_entity,
+      target_id,
+      old_values,
+      new_values,
+      notes,
+      created_at,
+      profiles:actor_id (
+        full_name,
+        email
+      )
+    `)
+    .order("created_at", { ascending: false })
+    .limit(25);
+
   const plansToRender = (feeRules && feeRules.length > 0) ? (feeRules as unknown as DbFeeRule[]) : defaultTiers;
 
   return (
     <div className="py-2">
-      <MembershipPlansAdminClient initialPlans={plansToRender} />
+      <MembershipPlansAdminClient initialPlans={plansToRender} initialAuditLogs={(auditLogs as any) || []} />
     </div>
   );
 }

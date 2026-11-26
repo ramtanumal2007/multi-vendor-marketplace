@@ -128,28 +128,57 @@ const mockFeeRules = [
 ];
 
 function calculateEstimatedEarnings(regularPrice, salePrice, quantity, plan, status, expiresAt, feeRules) {
-  const rawPlan = (plan || "BASIC").toUpperCase();
-  const isExpired = expiresAt ? new Date(expiresAt) < new Date() : false;
-  const isActive = (status || "active").toLowerCase() === "active" && !isExpired;
+  const isMembershipMissing = !plan;
+  if (isMembershipMissing) {
+    return {
+      isMembershipMissing: true,
+      effectivePlan: null,
+      blocked: true,
+    };
+  }
 
-  const effectivePlan = isActive ? rawPlan : "BASIC";
+  const rawPlan = plan.toUpperCase();
+  const now = Date.now();
+  const expiresAtMs = expiresAt ? new Date(expiresAt).getTime() : null;
+  const isExpired = expiresAtMs ? now > expiresAtMs : false;
+  const isStatusPastDue = (status || "").toLowerCase() === "past_due";
+
+  const isPaidPlan = rawPlan === "PRO" || rawPlan === "BUSINESS";
+  const gracePeriodEndMs = expiresAtMs ? expiresAtMs + 7 * 24 * 60 * 60 * 1000 : null;
+  const isInGracePeriod =
+    isPaidPlan &&
+    (isStatusPastDue || (expiresAtMs !== null && now > expiresAtMs && gracePeriodEndMs !== null && now <= gracePeriodEndMs));
+
+  const isExpiredPastGrace =
+    isPaidPlan && expiresAtMs !== null && gracePeriodEndMs !== null && now > gracePeriodEndMs;
+
+  const isStatusActive = (status || "active").toLowerCase() === "active";
+  const isActive = (isStatusActive && !isExpired) || isInGracePeriod;
+
+  const effectivePlan = isInGracePeriod ? rawPlan : isExpiredPastGrace ? "BASIC" : isActive ? rawPlan : "BASIC";
   const rule = feeRules.find((r) => r.membership_plan === effectivePlan) || feeRules[0];
 
   const hasSalePrice = salePrice > 0 && salePrice < regularPrice;
   const customerPrice = hasSalePrice ? salePrice : regularPrice;
 
+  const gstEnabled = rule.gst_enabled !== false;
+  const tcsEnabled = rule.tcs_enabled !== false;
+  const tdsEnabled = rule.tds_enabled !== false;
+
   const commission = customerPrice * rule.commission_rate;
-  const gstOnComm = commission * rule.gst_rate;
-  const tcs = customerPrice * rule.tcs_rate;
-  const tds = customerPrice * rule.tds_rate;
+  const gstOnComm = gstEnabled ? commission * rule.gst_rate : 0;
+  const tcs = tcsEnabled ? customerPrice * rule.tcs_rate : 0;
+  const tds = tdsEnabled ? customerPrice * rule.tds_rate : 0;
   const totalDeductions = commission + gstOnComm + tcs + tds;
   const perUnitEarnings = Math.max(0, customerPrice - totalDeductions);
   const totalEarnings = perUnitEarnings * quantity;
 
   return {
+    isMembershipMissing: false,
     effectivePlan,
     isActive,
     isExpired,
+    isInGracePeriod,
     customerPrice,
     commissionRate: rule.commission_rate,
     commissionAmount: Math.round(commission * 100) / 100,
@@ -210,12 +239,43 @@ runTest("Test 12: Sale price applies instead of regular price when valid", () =>
 });
 
 runTest("Test 13: Inactive / expired membership falls back to BASIC plan rules with warning", () => {
-  // Seller has PRO recorded, but membership expired in the past
+  // Seller has PRO recorded, but membership expired in the past (> 7 days)
   const result = calculateEstimatedEarnings(1000, 0, 1, "PRO", "active", "2020-01-01", mockFeeRules);
   assert.strictEqual(result.isExpired, true);
+  assert.strictEqual(result.isInGracePeriod, false);
   assert.strictEqual(result.isActive, false);
   assert.strictEqual(result.effectivePlan, "BASIC"); // Falls back to BASIC 12%
   assert.strictEqual(result.commissionAmount, 120.00);
+});
+
+runTest("Test 13.1: Seven-day past_due grace period preserves PRO 8% commission", () => {
+  // Expired 2 days ago (within 7-day grace window)
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const result = calculateEstimatedEarnings(1000, 0, 1, "PRO", "past_due", twoDaysAgo, mockFeeRules);
+  assert.strictEqual(result.isExpired, true);
+  assert.strictEqual(result.isInGracePeriod, true);
+  assert.strictEqual(result.effectivePlan, "PRO"); // Preserves PRO 8% rate!
+  assert.strictEqual(result.commissionAmount, 80.00);
+});
+
+runTest("Test 13.2: Missing membership record blocks official estimates without silent fallback", () => {
+  const result = calculateEstimatedEarnings(1000, 0, 1, null, null, null, mockFeeRules);
+  assert.strictEqual(result.isMembershipMissing, true);
+  assert.strictEqual(result.effectivePlan, null);
+  assert.strictEqual(result.blocked, true);
+});
+
+runTest("Test 13.3: Tax toggles (GST OFF, TCS OFF, TDS OFF) result in ₹0.00 deduction", () => {
+  const customRules = [
+    { membership_plan: "PRO", commission_rate: 0.08, gst_rate: 0.18, tcs_rate: 0.005, tds_rate: 0.001, gst_enabled: false, tcs_enabled: false, tds_enabled: false },
+  ];
+  const result = calculateEstimatedEarnings(1000, 0, 1, "PRO", "active", "2030-01-01", customRules);
+  assert.strictEqual(result.commissionAmount, 80.00);
+  assert.strictEqual(result.gstOnCommission, 0.00);
+  assert.strictEqual(result.tcsAmount, 0.00);
+  assert.strictEqual(result.tdsAmount, 0.00);
+  assert.strictEqual(result.totalDeductions, 80.00);
+  assert.strictEqual(result.perUnitEarnings, 920.00);
 });
 
 runTest("Test 14: Seller cannot manipulate commission through product creation payload", () => {

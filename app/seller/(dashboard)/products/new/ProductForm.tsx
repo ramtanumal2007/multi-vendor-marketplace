@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { ImageUploader, UploadedImageItem } from "@/components/ui/ImageUploader";
 import { generateMarketplaceSKU, getSKUPreview, normalizeSKU, checkSKUExists } from "@/lib/skuGenerator";
 import { CategoryCombobox } from "@/components/seller/CategoryCombobox";
-import { Loader2, Info, AlertTriangle, ShieldCheck, Zap } from "lucide-react";
+import { Loader2, Info, AlertTriangle, ShieldCheck, Zap, Clock } from "lucide-react";
 
 export interface FeeRule {
   membership_plan: string;
@@ -16,6 +16,11 @@ export interface FeeRule {
   tds_rate: number;
   min_payout_amount: number;
   escrow_hold_days: number;
+  gst_enabled?: boolean;
+  tcs_enabled?: boolean;
+  tds_enabled?: boolean;
+  fixed_platform_fee_paise?: number;
+  fixed_platform_fee_enabled?: boolean;
 }
 
 export interface SellerProfileInfo {
@@ -50,24 +55,45 @@ export default function ProductForm({
   const supabase = createClient();
 
   // Authoritative Membership & Fee Rule Resolution
-  const rawPlan = (sellerProfile?.membership_plan || "BASIC").toUpperCase();
-  const isExpired = sellerProfile?.membership_expires_at
-    ? new Date(sellerProfile.membership_expires_at) < new Date()
-    : false;
-  const isStatusActive = (sellerProfile?.membership_status || "active").toLowerCase() === "active";
-  const isActive = isStatusActive && !isExpired;
+  const isMembershipMissing = !sellerProfile?.membership_plan;
+  const rawPlan = (sellerProfile?.membership_plan || "").toUpperCase();
 
-  // Fallback to BASIC per backend rules if membership is expired or inactive
-  const effectivePlan = isActive ? rawPlan : "BASIC";
-  const activeFeeRule = feeRules.find((r) => r.membership_plan === effectivePlan) || {
-    membership_plan: effectivePlan,
-    commission_rate: effectivePlan === "BUSINESS" ? 0.05 : effectivePlan === "PRO" ? 0.08 : 0.12,
-    gst_rate: 0.18,
-    tcs_rate: 0.005,
-    tds_rate: 0.001,
-    min_payout_amount: 1000,
-    escrow_hold_days: 7,
-  };
+  const now = Date.now();
+  const expiresAtMs = sellerProfile?.membership_expires_at
+    ? new Date(sellerProfile.membership_expires_at).getTime()
+    : null;
+  const isExpired = expiresAtMs ? now > expiresAtMs : false;
+  const isStatusPastDue = (sellerProfile?.membership_status || "").toLowerCase() === "past_due";
+
+  // 7-day Grace Period evaluation:
+  // If status is past_due OR within 7 days after expires_at for a paid plan (PRO/BUSINESS)
+  const isPaidPlan = rawPlan === "PRO" || rawPlan === "BUSINESS";
+  const gracePeriodEndMs = expiresAtMs ? expiresAtMs + 7 * 24 * 60 * 60 * 1000 : null;
+  const isInGracePeriod =
+    isPaidPlan &&
+    (isStatusPastDue || (expiresAtMs !== null && now > expiresAtMs && gracePeriodEndMs !== null && now <= gracePeriodEndMs));
+
+  const isExpiredPastGrace =
+    isPaidPlan && expiresAtMs !== null && gracePeriodEndMs !== null && now > gracePeriodEndMs;
+
+  const isStatusActive = (sellerProfile?.membership_status || "active").toLowerCase() === "active";
+  const isActive = (isStatusActive && !isExpired) || isInGracePeriod;
+
+  // Plan resolution:
+  // 1. Missing -> null (no silent assumptions)
+  // 2. Active OR in 7-day grace period -> preserve paid plan (e.g. PRO 8%)
+  // 3. Expired past grace period -> downgraded to BASIC
+  const effectivePlan = isMembershipMissing
+    ? null
+    : isInGracePeriod
+    ? rawPlan
+    : isExpiredPastGrace
+    ? "BASIC"
+    : isActive
+    ? rawPlan
+    : "BASIC";
+
+  const activeFeeRule = effectivePlan ? feeRules.find((r) => r.membership_plan === effectivePlan) || null : null;
 
   // Real-time Earnings Calculation
   const regularPriceNum = parseFloat(regularPriceInput) || 0;
@@ -78,13 +104,20 @@ export default function ProductForm({
   // According to marketplace rules, the customer pays the sale price if applicable
   const customerPayingPrice = hasValidSalePrice ? salePriceNum : regularPriceNum;
 
-  const commissionRatePercent = (Number(activeFeeRule.commission_rate) * 100).toFixed(1);
-  const commissionAmount = customerPayingPrice * Number(activeFeeRule.commission_rate);
-  const gstOnCommission = commissionAmount * Number(activeFeeRule.gst_rate);
-  const tcsAmount = customerPayingPrice * Number(activeFeeRule.tcs_rate);
-  const tdsAmount = customerPayingPrice * Number(activeFeeRule.tds_rate);
-  const totalPlatformDeductions = commissionAmount + gstOnCommission + tcsAmount + tdsAmount;
-  const estimatedEarningsPerUnit = Math.max(0, customerPayingPrice - totalPlatformDeductions);
+  // Taxes & Platform Charge ON/OFF evaluation
+  const gstEnabled = activeFeeRule?.gst_enabled !== false;
+  const tcsEnabled = activeFeeRule?.tcs_enabled !== false;
+  const tdsEnabled = activeFeeRule?.tds_enabled !== false;
+  const fixedFeeEnabled = Boolean(activeFeeRule?.fixed_platform_fee_enabled);
+  const fixedFeeRupees = fixedFeeEnabled ? (Number(activeFeeRule?.fixed_platform_fee_paise) || 0) / 100 : 0;
+
+  const commissionRatePercent = activeFeeRule ? (Number(activeFeeRule.commission_rate) * 100).toFixed(1) : "0.0";
+  const commissionAmount = activeFeeRule ? Math.round(customerPayingPrice * Number(activeFeeRule.commission_rate) * 100) / 100 : 0;
+  const gstOnCommission = gstEnabled && activeFeeRule ? Math.round(commissionAmount * Number(activeFeeRule.gst_rate) * 100) / 100 : 0;
+  const tcsAmount = tcsEnabled && activeFeeRule ? Math.round(customerPayingPrice * Number(activeFeeRule.tcs_rate) * 100) / 100 : 0;
+  const tdsAmount = tdsEnabled && activeFeeRule ? Math.round(customerPayingPrice * Number(activeFeeRule.tds_rate) * 100) / 100 : 0;
+  const totalPlatformDeductions = activeFeeRule ? commissionAmount + gstOnCommission + tcsAmount + tdsAmount + fixedFeeRupees : 0;
+  const estimatedEarningsPerUnit = activeFeeRule ? Math.max(0, customerPayingPrice - totalPlatformDeductions) : 0;
   const totalEstimatedEarnings = estimatedEarningsPerUnit * Math.max(0, stockQuantityNum);
 
   const selectedCategoryObj = categories.find((c) => c.id === selectedCategoryId);
@@ -422,32 +455,64 @@ export default function ProductForm({
 
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
-              {rawPlan} Plan
+              {isMembershipMissing ? "No Membership" : `${effectivePlan} Plan`}
             </span>
             <span
               className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-                isActive
+                isMembershipMissing
+                  ? "bg-red-50 text-red-700 border-red-200"
+                  : isInGracePeriod
+                  ? "bg-amber-50 text-amber-700 border-amber-200"
+                  : isActive
                   ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                  : "bg-amber-50 text-amber-700 border-amber-200"
+                  : "bg-slate-100 text-slate-700 border-slate-200"
               }`}
             >
-              {isActive ? "Active" : isExpired ? "Expired" : "Inactive"}
+              {isMembershipMissing
+                ? "Configuration Missing"
+                : isInGracePeriod
+                ? "Grace Period (7-Day)"
+                : isExpiredPastGrace
+                ? "Expired (Downgraded to Basic)"
+                : isActive
+                ? "Active"
+                : "Inactive"}
             </span>
           </div>
         </div>
 
+        {/* Missing Membership Warning Banner */}
+        {isMembershipMissing && (
+          <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+            <div>
+              <strong className="font-bold">Membership Configuration Missing:</strong> Official financial estimates and commission rates are blocked until an authorized membership plan is configured for your seller account. Please activate a plan from the Membership page or contact Admin review.
+            </div>
+          </div>
+        )}
+
+        {/* Grace Period Warning Banner */}
+        {isInGracePeriod && (
+          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
+            <Clock className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+            <div>
+              <strong className="font-bold">Membership Grace Period Active:</strong> Your {rawPlan} plan has expired, but you are currently within the 7-day grace period. Your preferential {commissionRatePercent}% commission rate is preserved for new orders. Please renew before the grace period ends to prevent automatic downgrade to BASIC.
+            </div>
+          </div>
+        )}
+
         {/* Expired / Inactive Warning Banner */}
-        {!isActive && (
-          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+        {!isMembershipMissing && !isActive && !isInGracePeriod && (
+          <div className="p-3.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-800 text-xs flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-slate-600" />
             <p>
-              Your <strong>{rawPlan}</strong> membership is {isExpired ? "expired" : "inactive"}. Basic plan commission rates (12%) will apply to orders until renewed.
+              Your membership has expired beyond the 7-day grace period. Basic plan commission rates apply to orders until renewed.
             </p>
           </div>
         )}
 
         {/* Real-time Financial Breakdown */}
-        {customerPayingPrice > 0 ? (
+        {isMembershipMissing ? null : customerPayingPrice > 0 ? (
           <div className="space-y-3">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white p-3.5 rounded-xl border border-slate-200/60 shadow-xs">
               <div>
@@ -467,15 +532,27 @@ export default function ProductForm({
                 <span className="text-sm font-bold text-blue-600">
                   -₹{commissionAmount.toFixed(2)}
                 </span>
-                <span className="text-[10px] text-slate-400 block">+ ₹{gstOnCommission.toFixed(2)} GST (18%)</span>
+                <span className="text-[10px] text-slate-500 block">
+                  {gstEnabled ? `+ ₹${gstOnCommission.toFixed(2)} GST (${(Number(activeFeeRule?.gst_rate || 0.18) * 100).toFixed(0)}%)` : "GST: OFF — ₹0.00"}
+                </span>
               </div>
 
               <div>
-                <span className="block text-[11px] font-medium text-slate-500">Statutory Deductions</span>
+                <span className="block text-[11px] font-medium text-slate-500">Statutory & Platform Charges</span>
                 <span className="text-sm font-bold text-slate-700">
-                  -₹{(tcsAmount + tdsAmount).toFixed(2)}
+                  -₹{(tcsAmount + tdsAmount + fixedFeeRupees).toFixed(2)}
                 </span>
-                <span className="text-[10px] text-slate-400 block">TCS (0.5%) + TDS (0.1%)</span>
+                <div className="text-[10px] text-slate-500 space-y-0.5 mt-0.5">
+                  <span>TCS: {tcsEnabled ? `₹${tcsAmount.toFixed(2)}` : "OFF — ₹0.00"}</span>
+                  <span className="mx-1">•</span>
+                  <span>TDS: {tdsEnabled ? `₹${tdsAmount.toFixed(2)}` : "OFF — ₹0.00"}</span>
+                  {fixedFeeEnabled && (
+                    <>
+                      <span className="mx-1">•</span>
+                      <span>Fixed: ₹{fixedFeeRupees.toFixed(2)}</span>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div className="bg-emerald-50/60 p-2 rounded-lg border border-emerald-100">

@@ -87,7 +87,7 @@ export default async function NewProductPage() {
   // Fetch authoritative marketplace fee rules
   const { data: feeRules } = await supabase
     .from("marketplace_fee_rules")
-    .select("membership_plan, commission_rate, gst_rate, tcs_rate, tds_rate, min_payout_amount, escrow_hold_days")
+    .select("membership_plan, commission_rate, gst_rate, tcs_rate, tds_rate, min_payout_amount, escrow_hold_days, gst_enabled, tcs_enabled, tds_enabled, fixed_platform_fee_paise, fixed_platform_fee_enabled")
     .order("membership_plan");
 
   return (

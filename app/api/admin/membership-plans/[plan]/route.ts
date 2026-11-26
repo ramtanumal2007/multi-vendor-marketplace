@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { createServerClient, createAdminClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -106,6 +107,18 @@ export async function PATCH(
     if (body.minPayoutAmount < 0 || body.escrowHoldDays < 0 || body.gracePeriodDays < 0) {
       return NextResponse.json({ success: false, message: "Payout/membership days and amounts cannot be negative." }, { status: 400 });
     }
+    if (body.fixedPlatformFeePaise !== undefined && Number(body.fixedPlatformFeePaise) < 0) {
+      return NextResponse.json({ success: false, message: "Fixed platform fee cannot be negative." }, { status: 400 });
+    }
+
+    const gstEnabled = body.gstEnabled !== undefined ? Boolean(body.gstEnabled) : true;
+    const tcsEnabled = body.tcsEnabled !== undefined ? Boolean(body.tcsEnabled) : true;
+    const tdsEnabled = body.tdsEnabled !== undefined ? Boolean(body.tdsEnabled) : true;
+    const fixedPlatformFeePaise = Math.max(0, Math.round(Number(body.fixedPlatformFeePaise) || 0));
+    const fixedPlatformFeeEnabled = Boolean(body.fixedPlatformFeeEnabled);
+    const changeReason = typeof body.changeReason === "string" && body.changeReason.trim()
+      ? body.changeReason.trim()
+      : null;
 
     // Try RPC first
     const { data: rpcResult, error: rpcErr } = await supabase.rpc("admin_update_membership_plan", {
@@ -137,9 +150,24 @@ export async function PATCH(
       p_offer_label: body.offerLabel?.trim() || "Special Offer",
       p_offer_badge: body.offerBadge?.trim() || "Limited Time",
       p_offer_valid_until: body.offerValidUntil || null,
+      p_gst_enabled: gstEnabled,
+      p_tcs_enabled: tcsEnabled,
+      p_tds_enabled: tdsEnabled,
+      p_fixed_platform_fee_paise: fixedPlatformFeePaise,
+      p_fixed_platform_fee_enabled: fixedPlatformFeeEnabled,
+      p_change_reason: changeReason,
     });
 
     if (!rpcErr && rpcResult?.success) {
+      try {
+        revalidatePath("/admin/membership-plans");
+        revalidatePath("/admin/finance");
+        revalidatePath("/admin/finance/settings");
+        revalidatePath("/seller/products/new");
+        revalidatePath("/seller/membership");
+      } catch {
+        // Safe ignore
+      }
       return NextResponse.json({ success: true, result: rpcResult });
     }
 
@@ -183,6 +211,11 @@ export async function PATCH(
       offer_label: body.offerLabel?.trim() || "Special Offer",
       offer_badge: body.offerBadge?.trim() || "Limited Time",
       offer_valid_until: body.offerValidUntil || null,
+      gst_enabled: gstEnabled,
+      tcs_enabled: tcsEnabled,
+      tds_enabled: tdsEnabled,
+      fixed_platform_fee_paise: fixedPlatformFeePaise,
+      fixed_platform_fee_enabled: fixedPlatformFeeEnabled,
       updated_by: user.id,
       updated_at: new Date().toISOString(),
     };
@@ -208,10 +241,20 @@ export async function PATCH(
         target_id: updated?.id || null,
         old_values: oldRow || {},
         new_values: updatePayload,
-        notes: `Admin ${user.email} updated ${planUpper} membership plan rules`,
+        notes: changeReason || `Admin ${user.email} updated ${planUpper} membership plan rules (Commission: ${oldRow ? (oldRow.commission_rate * 100).toFixed(1) : "?"}% -> ${(Number(body.commissionRate) * 100).toFixed(1)}%)`,
       });
     } catch {
       // Non-fatal if table not yet created in dev
+    }
+
+    try {
+      revalidatePath("/admin/membership-plans");
+      revalidatePath("/admin/finance");
+      revalidatePath("/admin/finance/settings");
+      revalidatePath("/seller/products/new");
+      revalidatePath("/seller/membership");
+    } catch {
+      // Safe ignore
     }
 
     return NextResponse.json({ success: true, plan: updated });

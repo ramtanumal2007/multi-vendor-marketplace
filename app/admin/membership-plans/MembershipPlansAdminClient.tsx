@@ -27,6 +27,7 @@ import { DbFeeRule } from "@/lib/membership";
 
 interface MembershipPlansAdminClientProps {
   initialPlans: DbFeeRule[];
+  initialAuditLogs?: any[];
 }
 
 export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdminClientProps) {
@@ -59,6 +60,11 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
     gstRatePct: 18, // 18.00% -> 0.18
     tcsRatePct: 0.5, // 0.50% -> 0.005
     tdsRatePct: 0.1, // 0.10% -> 0.001
+    gstEnabled: true,
+    tcsEnabled: true,
+    tdsEnabled: true,
+    fixedPlatformFeePaise: 0,
+    fixedPlatformFeeEnabled: false,
     originalMonthlyPrice: "" as string | number,
     offerMonthlyPrice: "" as string | number,
     originalYearlyPrice: "" as string | number,
@@ -91,6 +97,11 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
       gstRatePct: Number((Number(plan.gst_rate || 0.18) * 100).toFixed(2)),
       tcsRatePct: Number((Number(plan.tcs_rate || 0.005) * 100).toFixed(2)),
       tdsRatePct: Number((Number(plan.tds_rate || 0.001) * 100).toFixed(2)),
+      gstEnabled: plan.gst_enabled ?? true,
+      tcsEnabled: plan.tcs_enabled ?? true,
+      tdsEnabled: plan.tds_enabled ?? true,
+      fixedPlatformFeePaise: plan.fixed_platform_fee_paise ?? 0,
+      fixedPlatformFeeEnabled: Boolean(plan.fixed_platform_fee_enabled),
       originalMonthlyPrice: plan.original_monthly_price ?? "",
       offerMonthlyPrice: plan.offer_monthly_price ?? "",
       originalYearlyPrice: plan.original_yearly_price ?? "",
@@ -220,6 +231,11 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
         offerLabel: formState.offerLabel.trim(),
         offerBadge: formState.offerBadge.trim(),
         offerValidUntil: formState.offerValidUntil ? new Date(formState.offerValidUntil).toISOString() : null,
+        gstEnabled: formState.gstEnabled,
+        tcsEnabled: formState.tcsEnabled,
+        tdsEnabled: formState.tdsEnabled,
+        fixedPlatformFeePaise: Number(formState.fixedPlatformFeePaise) || 0,
+        fixedPlatformFeeEnabled: formState.fixedPlatformFeeEnabled,
       };
 
       const res = await fetch(`/api/admin/membership-plans/${selectedPlan.membership_plan}`, {
@@ -1006,49 +1022,79 @@ export function MembershipPlansAdminClient({ initialPlans }: MembershipPlansAdmi
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      GST on Services (%)
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-slate-700">GST on Services (%)</label>
+                      <label className="flex items-center gap-1 text-[11px] font-bold cursor-pointer text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={formState.gstEnabled}
+                          onChange={(e) => setFormState({ ...formState, gstEnabled: e.target.checked })}
+                          className="rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        {formState.gstEnabled ? "ON" : "OFF"}
+                      </label>
+                    </div>
                     <input
                       type="number"
                       min="0"
                       max="100"
                       step="0.01"
+                      disabled={!formState.gstEnabled}
                       value={formState.gstRatePct}
                       onChange={(e) => setFormState({ ...formState, gstRatePct: Number(e.target.value) })}
-                      className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-mono"
+                      className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-mono disabled:opacity-50"
                     />
                     <span className="text-[10px] text-slate-400 mt-1 block">Default: 18.00%</span>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      GST TCS Rate (%)
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-slate-700">GST TCS Rate (%)</label>
+                      <label className="flex items-center gap-1 text-[11px] font-bold cursor-pointer text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={formState.tcsEnabled}
+                          onChange={(e) => setFormState({ ...formState, tcsEnabled: e.target.checked })}
+                          className="rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        {formState.tcsEnabled ? "ON" : "OFF"}
+                      </label>
+                    </div>
                     <input
                       type="number"
                       min="0"
                       max="10"
                       step="0.01"
+                      disabled={!formState.tcsEnabled}
                       value={formState.tcsRatePct}
                       onChange={(e) => setFormState({ ...formState, tcsRatePct: Number(e.target.value) })}
-                      className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-mono"
+                      className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-mono disabled:opacity-50"
                     />
                     <span className="text-[10px] text-slate-400 mt-1 block">Sec 52: 0.50%</span>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Sec 194-O TDS Rate (%)
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-slate-700">Sec 194-O TDS Rate (%)</label>
+                      <label className="flex items-center gap-1 text-[11px] font-bold cursor-pointer text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={formState.tdsEnabled}
+                          onChange={(e) => setFormState({ ...formState, tdsEnabled: e.target.checked })}
+                          className="rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        {formState.tdsEnabled ? "ON" : "OFF"}
+                      </label>
+                    </div>
                     <input
                       type="number"
                       min="0"
                       max="10"
                       step="0.01"
+                      disabled={!formState.tdsEnabled}
                       value={formState.tdsRatePct}
                       onChange={(e) => setFormState({ ...formState, tdsRatePct: Number(e.target.value) })}
-                      className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-mono"
+                      className="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-mono disabled:opacity-50"
                     />
                     <span className="text-[10px] text-slate-400 mt-1 block">Standard: 0.10%</span>
                   </div>

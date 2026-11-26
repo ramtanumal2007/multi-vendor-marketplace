@@ -120,6 +120,12 @@ export interface DbFeeRule {
   tcs_rate: number;
   tds_rate: number;
   platform_absorbs_coupons: boolean;
+  gst_enabled?: boolean;
+  tcs_enabled?: boolean;
+  tds_enabled?: boolean;
+  fixed_platform_fee_paise?: number;
+  fixed_platform_fee_enabled?: boolean;
+  other_platform_charges_paise?: number;
   updated_at?: string;
   updated_by?: string | null;
   profiles?: {

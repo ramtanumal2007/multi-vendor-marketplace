@@ -44,6 +44,7 @@ export const ADMIN_LINKS = [
   { label: "Payouts & Settlements", href: "/admin/finance", icon: Landmark },
   { label: "Bank Accounts", href: "/admin/finance/bank-accounts", icon: Landmark },
   { label: "Membership Plans", href: "/admin/membership-plans", icon: ShieldCheck },
+  { label: "Financial Settings", href: "/admin/finance/settings", icon: Settings },
   { label: "Coupons", href: "/admin/coupons", icon: Tags },
   { label: "Notifications", href: "/admin/notifications", icon: Bell },
   { label: "Media Library", href: "/admin/media", icon: ImageIcon },

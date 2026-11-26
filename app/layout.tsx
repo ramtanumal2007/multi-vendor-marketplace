@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/lib/context/ThemeContext";
+import { NavigationProgressBar } from "@/components/ui/NavigationProgressBar";
+import { Suspense } from "react";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -45,6 +47,9 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${playfair.variable} font-sans antialiased bg-background text-foreground transition-colors duration-300`}
       >
+        <Suspense fallback={null}>
+          <NavigationProgressBar />
+        </Suspense>
         <ThemeProvider>
           {children}
         </ThemeProvider>

@@ -20,6 +20,7 @@ import {
   Wallet,
   Menu,
   X,
+  Loader2,
 } from "lucide-react";
 import { SellerNotificationCenter } from "@/components/seller/SellerNotificationCenter";
 
@@ -45,11 +46,13 @@ interface SellerNavigationProps {
 
 export function SellerNavigation({ sellerId, children }: SellerNavigationProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [navigatingHref, setNavigatingHref] = useState<string | null>(null);
   const pathname = usePathname();
 
-  // Close mobile drawer on route change
+  // Close mobile drawer and reset navigation loading state on route change
   useEffect(() => {
     setMobileMenuOpen(false);
+    setNavigatingHref(null);
   }, [pathname]);
 
   // Handle ESC key to close mobile drawer
@@ -103,23 +106,32 @@ export function SellerNavigation({ sellerId, children }: SellerNavigationProps) 
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar">
           {SELLER_NAV_LINKS.map((link) => {
             const active = isActive(link.href);
+            const isNavigating = navigatingHref === link.href && !active;
             const Icon = link.icon;
             return (
               <Link
                 key={link.label}
                 href={link.href}
+                onClick={() => {
+                  if (!active) setNavigatingHref(link.href);
+                }}
                 className={`flex items-center px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   active
                     ? "bg-blue-50 text-blue-700 font-bold shadow-xs"
+                    : isNavigating
+                    ? "bg-blue-50/50 text-blue-700"
                     : "text-slate-700 hover:text-slate-900 hover:bg-slate-100"
                 }`}
               >
                 <Icon
                   className={`h-4 w-4 mr-3 shrink-0 ${
-                    active ? "text-blue-600" : "text-slate-500"
+                    active || isNavigating ? "text-blue-600" : "text-slate-500"
                   }`}
                 />
-                <span className="truncate">{link.label}</span>
+                <span className="truncate flex-1">{link.label}</span>
+                {isNavigating && (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 shrink-0 ml-1.5" />
+                )}
               </Link>
             );
           })}
@@ -189,24 +201,33 @@ export function SellerNavigation({ sellerId, children }: SellerNavigationProps) 
             <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
               {SELLER_NAV_LINKS.map((link) => {
                 const active = isActive(link.href);
+                const isNavigating = navigatingHref === link.href && !active;
                 const Icon = link.icon;
                 return (
                   <Link
                     key={link.label}
                     href={link.href}
-                    onClick={() => setMobileMenuOpen(false)}
+                    onClick={() => {
+                      if (!active) setNavigatingHref(link.href);
+                      setMobileMenuOpen(false);
+                    }}
                     className={`flex items-center px-3.5 py-3 rounded-xl text-sm font-semibold transition-all ${
                       active
                         ? "bg-blue-50 text-blue-700 font-bold shadow-xs"
+                        : isNavigating
+                        ? "bg-blue-50/50 text-blue-700"
                         : "text-slate-700 hover:text-slate-900 hover:bg-slate-100"
                     }`}
                   >
                     <Icon
                       className={`h-4 w-4 mr-3 shrink-0 ${
-                        active ? "text-blue-600" : "text-slate-500"
+                        active || isNavigating ? "text-blue-600" : "text-slate-500"
                       }`}
                     />
-                    <span className="truncate">{link.label}</span>
+                    <span className="truncate flex-1">{link.label}</span>
+                    {isNavigating && (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 shrink-0 ml-1.5" />
+                    )}
                   </Link>
                 );
               })}

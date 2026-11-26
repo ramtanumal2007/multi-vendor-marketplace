@@ -26,7 +26,7 @@ export default async function NewProductPage() {
   // Fetch seller profile
   const { data: sellerProfile } = await supabase
     .from("seller_profiles")
-    .select("verification_status, membership_plan")
+    .select("verification_status, membership_plan, membership_status, membership_expires_at")
     .eq("id", session.user.id)
     .single();
 
@@ -84,6 +84,12 @@ export default async function NewProductPage() {
     .select("id, name")
     .order("name");
 
+  // Fetch authoritative marketplace fee rules
+  const { data: feeRules } = await supabase
+    .from("marketplace_fee_rules")
+    .select("membership_plan, commission_rate, gst_rate, tcs_rate, tds_rate, min_payout_amount, escrow_hold_days")
+    .order("membership_plan");
+
   return (
     <div>
       <div className="mb-6">
@@ -95,7 +101,12 @@ export default async function NewProductPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-        <ProductForm storeId={store.id} categories={categories || []} />
+        <ProductForm
+          storeId={store.id}
+          categories={categories || []}
+          sellerProfile={sellerProfile}
+          feeRules={feeRules || []}
+        />
       </div>
     </div>
   );

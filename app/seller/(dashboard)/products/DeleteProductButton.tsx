@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { extractStoragePath } from "@/lib/imageOptimizer";
@@ -56,9 +56,16 @@ export default function DeleteProductButton({ productId, productTitle }: { produ
         <button
           onClick={handleDelete}
           disabled={loading}
-          className="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded disabled:opacity-50"
+          className="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded disabled:opacity-50 inline-flex items-center"
         >
-          {loading ? "..." : "Yes"}
+          {loading ? (
+            <>
+              <Loader2 className="w-3 h-3 animate-spin mr-1" />
+              Deleting...
+            </>
+          ) : (
+            "Yes"
+          )}
         </button>
         <button
           onClick={() => setConfirming(false)}

@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { ImageUploader, UploadedImageItem } from "@/components/ui/ImageUploader";
 import { extractStoragePath } from "@/lib/imageOptimizer";
 import { generateMarketplaceSKU, getSKUPreview, normalizeSKU, checkSKUExists } from "@/lib/skuGenerator";
+import { CategoryCombobox } from "@/components/seller/CategoryCombobox";
+import { Loader2 } from "lucide-react";
 
 interface CategoryItem {
   id: string;
@@ -276,24 +278,21 @@ export default function EditProductForm({ product, categories }: { product: Prod
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <label htmlFor="category_id" className="block text-sm font-medium text-gray-700">Category *</label>
-          <select
-            name="category_id"
-            id="category_id"
-            required
+          <label htmlFor="category_id" className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+          <CategoryCombobox
+            categories={categories}
             value={selectedCategoryId}
-            onChange={(e) => setSelectedCategoryId(e.target.value)}
-            className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md py-2 px-3 border bg-white"
-          >
-            <option value="">Select a category</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>{cat.name}</option>
-            ))}
-          </select>
+            onChange={(id) => {
+              setSelectedCategoryId(id);
+              if (error && error.includes("category")) setError(null);
+            }}
+            required
+            placeholder="Search or select a category..."
+          />
         </div>
 
         <div>
-          <label htmlFor="sku" className="block text-sm font-medium text-gray-700">SKU (Auto-generated if blank)</label>
+          <label htmlFor="sku" className="block text-sm font-medium text-gray-700 mb-1">SKU (Auto-generated if blank)</label>
           <input
             type="text"
             name="sku"
@@ -344,9 +343,16 @@ export default function EditProductForm({ product, categories }: { product: Prod
         <button
           type="submit"
           disabled={loading}
-          className="inline-flex justify-center py-2 px-6 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+          className="inline-flex items-center justify-center py-2 px-6 border border-transparent shadow-sm text-sm font-semibold rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 transition-all cursor-pointer"
         >
-          {loading ? "Saving..." : "Update Product"}
+          {loading ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin shrink-0" />
+              <span>Updating product...</span>
+            </>
+          ) : (
+            <span>Update Product</span>
+          )}
         </button>
       </div>
     </form>

@@ -404,6 +404,7 @@ function SellerRegisterContent() {
                     size="lg"
                     type="submit"
                     isLoading={isLoading}
+                    loadingText="Submitting application..."
                     className="w-full h-12 text-sm font-bold shadow-md hover:shadow-lg transition-all rounded-xl"
                   >
                     Submit Application

@@ -31,6 +31,7 @@ function LoginContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const supabase = createClient();
   const { addToast } = useToast();
@@ -87,31 +88,37 @@ function LoginContent() {
 
   const handleVerified = async () => {
     setIsSigningIn(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      // Ensure customer profile is updated idempotently with full_name & phone
-      if (fullName || phone) {
-        await supabase.from("profiles").upsert({
-          id: user.id,
-          email: user.email || email.trim(),
-          full_name: fullName.trim() || user.user_metadata?.full_name,
-          phone: phone.trim() || user.user_metadata?.phone,
-          role: "customer",
-          updated_at: new Date().toISOString()
-        }, { onConflict: "id" });
-      }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Ensure customer profile is updated idempotently with full_name & phone strictly on signup
+        if (!isLogin && (fullName || phone)) {
+          await supabase.from("profiles").upsert({
+            id: user.id,
+            email: user.email || email.trim(),
+            full_name: fullName.trim() || user.user_metadata?.full_name,
+            phone: phone.trim() || user.user_metadata?.phone,
+            role: "customer",
+            updated_at: new Date().toISOString()
+          }, { onConflict: "id" });
+        }
 
-      await routeUser(user.id);
-    } else {
+        await routeUser(user.id);
+      } else {
+        setIsSigningIn(false);
+        addToast({ title: "Error", description: "Failed to establish session after verification.", type: "error" });
+        setShowOTPVerification(false);
+      }
+    } catch (err: any) {
       setIsSigningIn(false);
-      addToast({ title: "Error", description: "Failed to establish session after verification.", type: "error" });
+      addToast({ title: "Error", description: err?.message || "Failed to establish session.", type: "error" });
       setShowOTPVerification(false);
     }
   };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isLoading || isSigningIn) return; // Prevent duplicate login submissions
+    if (isLoading || isSigningIn || isGoogleLoading) return; // Prevent duplicate login submissions
 
     setIsLoading(true);
     setAccountNotFound(false);
@@ -120,33 +127,40 @@ function LoginContent() {
     const cleanEmail = email.trim();
     const cleanPassword = password;
 
-    if (isLogin) {
-      if (loginMethod === "password") {
-        const { data: authData, error } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password: cleanPassword
-        });
-        if (error) {
-          setIsLoading(false);
-          setIsSigningIn(false);
-          // Authoritatively verify if the account exists
-          try {
-            const checkRes = await fetch("/api/auth/validate-login-account", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email: cleanEmail, targetPortal: "customer" }),
-            });
-            const checkData = await checkRes.json();
-            if (!checkData.exists) {
-              setAccountNotFound(true);
-              setIncorrectCredentials(false);
-              addToast({
-                title: "Account Not Found",
-                description: "No account found with this email. Please create an account first.",
-                type: "error"
+    try {
+      if (isLogin) {
+        if (loginMethod === "password") {
+          const { data: authData, error } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password: cleanPassword
+          });
+          if (error) {
+            // Keep isLoading TRUE while verifying account existence so the button displays feedback
+            try {
+              const checkRes = await fetch("/api/auth/validate-login-account", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email: cleanEmail, targetPortal: "customer" }),
               });
-            } else {
-              setAccountNotFound(false);
+              const checkData = await checkRes.json();
+              if (!checkData.exists) {
+                setAccountNotFound(true);
+                setIncorrectCredentials(false);
+                addToast({
+                  title: "Account Not Found",
+                  description: "No account found with this email. Please create an account first.",
+                  type: "error"
+                });
+              } else {
+                setAccountNotFound(false);
+                setIncorrectCredentials(true);
+                addToast({
+                  title: "Authentication Failed",
+                  description: "Incorrect email or password. Please try again.",
+                  type: "error"
+                });
+              }
+            } catch {
               setIncorrectCredentials(true);
               addToast({
                 title: "Authentication Failed",
@@ -154,22 +168,16 @@ function LoginContent() {
                 type: "error"
               });
             }
-          } catch {
-            setIncorrectCredentials(true);
-            addToast({
-              title: "Authentication Failed",
-              description: "Incorrect email or password. Please try again.",
-              type: "error"
-            });
+            return;
+          } else if (authData?.user) {
+            // Immediately display professional signing-in overlay
+            setIsSigningIn(true);
+            setAccountNotFound(false);
+            setIncorrectCredentials(false);
+            await routeUser(authData.user.id);
+            return;
           }
-        } else if (authData?.user) {
-          // Immediately display professional signing-in overlay
-          setIsSigningIn(true);
-          setAccountNotFound(false);
-          setIncorrectCredentials(false);
-          await routeUser(authData.user.id);
-        }
-      } else {
+        } else {
         // OTP Login Request
         const { error } = await supabase.auth.signInWithOtp({
           email: cleanEmail,
@@ -296,12 +304,18 @@ function LoginContent() {
         setShowOTPVerification(true);
       }
     }
-
+  } catch (err: any) {
+    console.error("[handleAuth error]:", err);
+    addToast({ title: "Authentication Error", description: err?.message || "An unexpected error occurred.", type: "error" });
+  } finally {
     setIsLoading(false);
-  };
+  }
+};
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading || isSigningIn) return;
+
     const cleanEmail = email.trim();
     if (!cleanEmail) {
       addToast({ title: "Validation Error", description: "Please enter your registered email address.", type: "error" });
@@ -311,48 +325,59 @@ function LoginContent() {
     setIsLoading(true);
     setAccountNotFound(false);
 
-    // Verify account exists before requesting recovery
     try {
-      const checkRes = await fetch("/api/auth/validate-login-account", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: cleanEmail, targetPortal: "customer" }),
-      });
-      const checkData = await checkRes.json();
-      if (!checkData.exists) {
-        setAccountNotFound(true);
-        addToast({
-          title: "Account Not Found",
-          description: "No account found with this email. Please create an account first.",
-          type: "error"
+      // Verify account exists before requesting recovery
+      try {
+        const checkRes = await fetch("/api/auth/validate-login-account", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: cleanEmail, targetPortal: "customer" }),
         });
-        setIsLoading(false);
-        return;
+        const checkData = await checkRes.json();
+        if (!checkData.exists) {
+          setAccountNotFound(true);
+          addToast({
+            title: "Account Not Found",
+            description: "No account found with this email. Please create an account first.",
+            type: "error"
+          });
+          return;
+        }
+      } catch {
+        // Proceed to Supabase call
       }
-    } catch {
-      // Proceed to Supabase call
-    }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
 
-    if (error) {
-      addToast({ title: "Password Reset Request Failed", description: error.message, type: "error" });
-    } else {
-      setIsRecoveryOTP(true);
-      addToast({
-        title: "Recovery Code Dispatched",
-        description: "A 6-digit recovery code has been sent to your email.",
-        type: "success"
-      });
+      if (error) {
+        addToast({ title: "Password Reset Request Failed", description: error.message, type: "error" });
+      } else {
+        setIsRecoveryOTP(true);
+        addToast({
+          title: "Recovery Code Dispatched",
+          description: "A 6-digit recovery code has been sent to your email.",
+          type: "success"
+        });
+      }
+    } catch (err: any) {
+      addToast({ title: "Error", description: err?.message || "Failed to dispatch recovery code.", type: "error" });
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleGoogleOAuth = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` }
-    });
+    if (isGoogleLoading || isLoading || isSigningIn) return;
+    setIsGoogleLoading(true);
+    try {
+      await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}/auth/callback` }
+      });
+    } catch (err: any) {
+      addToast({ title: "OAuth Error", description: err?.message || "Failed to initiate Google sign-in.", type: "error" });
+      setIsGoogleLoading(false);
+    }
   };
 
   // Immediate full-page signing-in state while role authorization & navigation completes
@@ -484,7 +509,7 @@ function LoginContent() {
                         </div>
                       </div>
 
-                      <Button variant="primary" size="lg" type="submit" isLoading={isLoading} className="w-full h-11 sm:h-12 font-semibold text-sm rounded-xl mt-1">
+                      <Button variant="primary" size="lg" type="submit" isLoading={isLoading} loadingText="Sending OTP..." className="w-full h-11 sm:h-12 font-semibold text-sm rounded-xl mt-1">
                         Send Recovery Code
                       </Button>
 
@@ -788,7 +813,8 @@ function LoginContent() {
                     size="lg"
                     type="submit"
                     isLoading={isLoading}
-                    disabled={isLoading}
+                    loadingText={isLogin ? (loginMethod === "password" ? "Signing in..." : "Sending OTP...") : "Creating account..."}
+                    disabled={isLoading || isGoogleLoading || isSigningIn}
                     className="w-full mt-2 h-11 sm:h-12 font-semibold text-sm rounded-xl shadow-sm"
                   >
                     {isLogin ? (loginMethod === "password" ? "Sign In" : "Send Login Code") : "Create Account"}
@@ -805,6 +831,9 @@ function LoginContent() {
                     variant="outline"
                     type="button"
                     size="lg"
+                    isLoading={isGoogleLoading}
+                    loadingText="Connecting to Google..."
+                    disabled={isLoading || isGoogleLoading || isSigningIn}
                     className="w-full h-11 sm:h-12 flex items-center justify-center gap-2.5 text-xs sm:text-sm font-semibold rounded-xl border-border hover:bg-background-secondary transition-colors"
                     onClick={handleGoogleOAuth}
                   >

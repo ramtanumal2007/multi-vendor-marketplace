@@ -56,36 +56,6 @@ export async function POST(request: Request) {
     // Instantiate authoritative service-role admin client (server-side only)
     const admin = createAdminClient();
 
-    // Enforce 15 requests/min per IP via distributed PostgreSQL RPC
-    let ipLimitResult;
-    try {
-      ipLimitResult = await checkDistributedRateLimit(admin, {
-        keyHash: ipKeyHash,
-        bucketType: "login_ip",
-        maxHits: 15,
-        windowSeconds: 60,
-      });
-    } catch (dbErr) {
-      // FAIL-CLOSED: On database failure or timeout, deny access to protect against brute force
-      console.error("[validate-login-account] DB rate limit failure (IP), failing closed:", dbErr);
-      return NextResponse.json(
-        { exists: true, error: "Too many login attempts. Please try again later." },
-        { status: 429 }
-      );
-    }
-
-    if (!ipLimitResult.success) {
-      return NextResponse.json(
-        { exists: true, error: "Too many login attempts. Please try again later." },
-        {
-          status: 429,
-          headers: {
-            "Retry-After": ipLimitResult.retryAfter.toString(),
-          },
-        }
-      );
-    }
-
     // 3. Body & Input Validation
     const body = await request.json().catch(() => ({}));
     const rawEmail = body.email;
@@ -110,20 +80,42 @@ export async function POST(request: Request) {
     // Prevents distributed botnets from hammering a single victim's account across multiple IPs
     const emailKeyHash = hashRateLimitKey("login_email_target", cleanEmail);
 
+    // Parallelize distributed rate limit checks across IP and target email to eliminate sequential roundtrips
+    let ipLimitResult;
     let emailLimitResult;
     try {
-      emailLimitResult = await checkDistributedRateLimit(admin, {
-        keyHash: emailKeyHash,
-        bucketType: "login_email_target",
-        maxHits: 5,
-        windowSeconds: 60,
-      });
+      [ipLimitResult, emailLimitResult] = await Promise.all([
+        checkDistributedRateLimit(admin, {
+          keyHash: ipKeyHash,
+          bucketType: "login_ip",
+          maxHits: 15,
+          windowSeconds: 60,
+        }),
+        checkDistributedRateLimit(admin, {
+          keyHash: emailKeyHash,
+          bucketType: "login_email_target",
+          maxHits: 5,
+          windowSeconds: 60,
+        }),
+      ]);
     } catch (dbErr) {
       // FAIL-CLOSED: On database failure or timeout, deny access to protect against brute force
-      console.error("[validate-login-account] DB rate limit failure (Email), failing closed:", dbErr);
+      console.error("[validate-login-account] DB rate limit failure, failing closed:", dbErr);
       return NextResponse.json(
-        { exists: true, error: "Too many attempts for this account. Please wait before retrying." },
+        { exists: true, error: "Too many login attempts. Please try again later." },
         { status: 429 }
+      );
+    }
+
+    if (!ipLimitResult.success) {
+      return NextResponse.json(
+        { exists: true, error: "Too many login attempts. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": ipLimitResult.retryAfter.toString(),
+          },
+        }
       );
     }
 
@@ -140,38 +132,37 @@ export async function POST(request: Request) {
     }
 
     // 5. Authoritative Server-Side Query (Using Service Role exclusively on server)
-    // Check profiles (customers / admins)
-    const { data: profile } = await admin
-      .from("profiles")
-      .select("id, role")
-      .ilike("email", cleanEmail)
-      .maybeSingle();
-
-    // Check seller_profiles (merchants)
-    const { data: sellerProfile } = await admin
-      .from("seller_profiles")
-      .select("id, verification_status")
-      .ilike("business_email", cleanEmail)
-      .maybeSingle();
-
-    // Authoritative check on auth.users
-    let authUserExists = false;
-    try {
-      const { data: authUser } = await admin
-        .schema("auth")
-        .from("users")
-        .select("id")
+    // Concurrently query profiles, seller_profiles, and auth.users in parallel to minimize response latency
+    const [profileRes, sellerProfileRes, authUserRes] = await Promise.all([
+      admin
+        .from("profiles")
+        .select("id, role")
         .ilike("email", cleanEmail)
-        .maybeSingle();
+        .maybeSingle(),
+      admin
+        .from("seller_profiles")
+        .select("id, verification_status")
+        .ilike("business_email", cleanEmail)
+        .maybeSingle(),
+      (async () => {
+        try {
+          return await admin
+            .schema("auth")
+            .from("users")
+            .select("id")
+            .ilike("email", cleanEmail)
+            .maybeSingle();
+        } catch {
+          return { data: null };
+        }
+      })(),
+    ]);
 
-      if (authUser?.id) {
-        authUserExists = true;
-      }
-    } catch {
-      // Profiles and seller_profiles provide authoritative fallback
-    }
+    const profile = profileRes.data;
+    const sellerProfile = sellerProfileRes.data;
+    const authUser = authUserRes.data;
 
-    let exists = !!profile || !!sellerProfile || authUserExists;
+    let exists = !!profile || !!sellerProfile || !!authUser?.id;
 
     // Portal-specific presence check
     if (targetPortal === "seller") {

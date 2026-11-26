@@ -37,6 +37,7 @@ export function OTPVerification({
 }: OTPVerificationProps) {
   const [code, setCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isResending, setIsResending] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(60);
   const { addToast } = useToast();
   const supabase = createClient();
@@ -53,6 +54,7 @@ export function OTPVerification({
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading || isResending) return;
     if (code.length !== 6) {
       addToast({
         title: "Invalid Code",
@@ -63,99 +65,129 @@ export function OTPVerification({
     }
     setIsLoading(true);
 
-    const cleanEmail = email.trim();
-    const cleanToken = code.trim();
+    try {
+      const cleanEmail = email.trim();
+      const cleanToken = code.trim();
 
-    let error: { message?: string } | null = null;
+      let error: { message?: string } | null = null;
 
-    if (type === "signup") {
-      // Directly verify signup confirmation OTP without fallbacks
-      const res = await supabase.auth.verifyOtp({
-        email: cleanEmail,
-        token: cleanToken,
-        type: "signup",
-      });
-      error = res.error;
-    } else if (type === "recovery") {
-      // Directly verify password recovery OTP
-      const res = await supabase.auth.verifyOtp({
-        email: cleanEmail,
-        token: cleanToken,
-        type: "recovery",
-      });
-      error = res.error;
-    } else {
-      // Directly verify email sign-in OTP
-      const res = await supabase.auth.verifyOtp({
-        email: cleanEmail,
-        token: cleanToken,
-        type: "email",
-      });
-      error = res.error;
-    }
+      if (type === "signup") {
+        // Directly verify signup confirmation OTP without fallbacks
+        const res = await supabase.auth.verifyOtp({
+          email: cleanEmail,
+          token: cleanToken,
+          type: "signup",
+        });
+        error = res.error;
+      } else if (type === "recovery") {
+        // Directly verify password recovery OTP
+        const res = await supabase.auth.verifyOtp({
+          email: cleanEmail,
+          token: cleanToken,
+          type: "recovery",
+        });
+        error = res.error;
+      } else {
+        // First verify using 'email' type (standard GoTrue signInWithOtp)
+        let res = await supabase.auth.verifyOtp({
+          email: cleanEmail,
+          token: cleanToken,
+          type: "email",
+        });
+        // Graceful fallback to 'magiclink' if GoTrue expects magiclink token type
+        if (res.error && (res.error.message?.toLowerCase().includes("type") || res.error.message?.toLowerCase().includes("invalid"))) {
+          const fallbackRes = await supabase.auth.verifyOtp({
+            email: cleanEmail,
+            token: cleanToken,
+            type: "magiclink" as any,
+          });
+          if (!fallbackRes.error) {
+            res = fallbackRes;
+          }
+        }
+        error = res.error;
+      }
 
-    if (error) {
+      if (error) {
+        setCode("");
+        addToast({
+          title: "Verification Failed",
+          description: error.message || "Invalid or expired code. Please enter the latest code or request a new one.",
+          type: "error"
+        });
+        setIsLoading(false);
+      } else {
+        addToast({ title: "Verified Successfully", type: "success" });
+        onVerified();
+      }
+    } catch (err: any) {
       setCode("");
       addToast({
-        title: "Verification Failed",
-        description: error.message || "Invalid or expired code. Please enter the latest code or request a new one.",
+        title: "Verification Error",
+        description: err?.message || "An unexpected error occurred during verification.",
         type: "error"
       });
       setIsLoading(false);
-    } else {
-      addToast({ title: "Verified Successfully", type: "success" });
-      onVerified();
     }
   };
 
   const handleResend = async () => {
-    if (resendCooldown > 0 || isLoading) return;
+    if (resendCooldown > 0 || isLoading || isResending) return;
 
-    setIsLoading(true);
+    setIsResending(true);
     let resendError;
 
-    const cleanEmail = email.trim();
+    try {
+      const cleanEmail = email.trim();
 
-    if (type === "recovery") {
-      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
-      resendError = error;
-    } else if (type === "email") {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: cleanEmail,
-        options: { shouldCreateUser: false }
-      });
-      resendError = error;
-    } else {
-      const { error } = await supabase.auth.resend({
-        type: "signup",
-        email: cleanEmail
-      });
-      resendError = error;
-    }
-
-    if (resendError) {
-      if (resendError.message.includes("rate limit") || resendError.message.toLowerCase().includes("too many")) {
-        addToast({
-          title: "Too Many Requests",
-          description: "Please wait before requesting another verification code.",
-          type: "error"
+      if (type === "recovery") {
+        const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+        resendError = error;
+      } else if (type === "email") {
+        const { error } = await supabase.auth.signInWithOtp({
+          email: cleanEmail,
+          options: { shouldCreateUser: false }
         });
+        resendError = error;
+      } else {
+        const { error } = await supabase.auth.resend({
+          type: "signup",
+          email: cleanEmail
+        });
+        resendError = error;
+      }
+
+      if (resendError) {
+        if (resendError.message.includes("rate limit") || resendError.message.toLowerCase().includes("too many")) {
+          addToast({
+            title: "Too Many Requests",
+            description: "Please wait before requesting another verification code.",
+            type: "error"
+          });
+        } else {
+          addToast({
+            title: "Failed to Resend",
+            description: resendError.message,
+            type: "error"
+          });
+        }
       } else {
         addToast({
-          title: "Failed to Resend",
-          description: resendError.message,
-          type: "error"
+          title: "Code Resent",
+          description: "A fresh verification code has been dispatched to your email.",
+          type: "success"
         });
+        setResendCooldown(60);
       }
-    } else {
+    } catch (err: any) {
       addToast({
-        title: "Code Resent",
-        description: "A fresh verification code has been dispatched to your email.",
-        type: "success"
+        title: "Failed to Resend",
+        description: err?.message || "An unexpected error occurred while resending code.",
+        type: "error"
       });
-      setResendCooldown(60);
+    } finally {
+      setIsResending(false);
     }
-    setIsLoading(false);
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -207,14 +239,12 @@ export function OTPVerification({
 
         <Button
           type="submit"
-          disabled={isLoading || code.length !== 6}
+          isLoading={isLoading}
+          loadingText="Verifying OTP..."
+          disabled={isLoading || isResending || code.length !== 6}
           className="w-full h-12 text-sm sm:text-base font-semibold rounded-xl shadow-sm"
         >
-          {isLoading ? (
-            <span className="flex items-center gap-2">
-              <Loader2 className="animate-spin h-5 w-5" /> Verifying...
-            </span>
-          ) : "Verify Email"}
+          Verify Code
         </Button>
       </form>
 
@@ -225,10 +255,19 @@ export function OTPVerification({
           <button
             type="button"
             onClick={handleResend}
-            disabled={resendCooldown > 0 || isLoading}
-            className="font-semibold text-accent hover:text-accent-hover transition-colors disabled:text-foreground-secondary/50 disabled:cursor-not-allowed"
+            disabled={resendCooldown > 0 || isLoading || isResending}
+            className="font-semibold text-accent hover:text-accent-hover transition-colors disabled:text-foreground-secondary/50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
           >
-            {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend Code"}
+            {isResending ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Resending OTP...</span>
+              </>
+            ) : resendCooldown > 0 ? (
+              `Resend in ${resendCooldown}s`
+            ) : (
+              "Resend Code"
+            )}
           </button>
         </div>
 
@@ -236,7 +275,7 @@ export function OTPVerification({
           <button
             type="button"
             onClick={onBack}
-            disabled={isLoading}
+            disabled={isLoading || isResending}
             className="inline-flex items-center gap-1.5 text-xs text-foreground-secondary hover:text-foreground underline underline-offset-4 transition-colors font-medium mt-1"
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Change email address

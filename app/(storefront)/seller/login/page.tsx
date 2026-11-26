@@ -134,32 +134,40 @@ function SellerLoginContent() {
 
     const cleanEmail = email.trim();
 
-    if (loginMethod === "password") {
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password
-      });
+    try {
+      if (loginMethod === "password") {
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password
+        });
 
-      if (authError) {
-        setIsLoading(false);
-        setIsSigningIn(false);
-        try {
-          const checkRes = await fetch("/api/auth/validate-login-account", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: cleanEmail, targetPortal: "seller" }),
-          });
-          const checkData = await checkRes.json();
-          if (!checkData.exists) {
-            setAccountNotFound(true);
-            setIncorrectCredentials(false);
-            addToast({
-              title: "Account Not Found",
-              description: "No account found with this email. Please create an account first.",
-              type: "error"
+        if (authError) {
+          setIsSigningIn(false);
+          try {
+            const checkRes = await fetch("/api/auth/validate-login-account", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email: cleanEmail, targetPortal: "seller" }),
             });
-          } else {
-            setAccountNotFound(false);
+            const checkData = await checkRes.json();
+            if (!checkData.exists) {
+              setAccountNotFound(true);
+              setIncorrectCredentials(false);
+              addToast({
+                title: "Account Not Found",
+                description: "No account found with this email. Please create an account first.",
+                type: "error"
+              });
+            } else {
+              setAccountNotFound(false);
+              setIncorrectCredentials(true);
+              addToast({
+                title: "Authentication Failed",
+                description: "Incorrect email or password. Please try again.",
+                type: "error"
+              });
+            }
+          } catch {
             setIncorrectCredentials(true);
             addToast({
               title: "Authentication Failed",
@@ -167,56 +175,49 @@ function SellerLoginContent() {
               type: "error"
             });
           }
-        } catch {
-          setIncorrectCredentials(true);
-          addToast({
-            title: "Authentication Failed",
-            description: "Incorrect email or password. Please try again.",
-            type: "error"
-          });
+          return;
         }
-        return;
-      }
 
-      setAccountNotFound(false);
-      setIncorrectCredentials(false);
-      setIsSigningIn(true);
-      await routeSeller(authData.user!.id, authData);
-    } else {
-      // OTP Login Request
-      const { error } = await supabase.auth.signInWithOtp({
-        email: cleanEmail,
-        options: { shouldCreateUser: false }
-      });
-      if (error) {
-        try {
-          const checkRes = await fetch("/api/auth/validate-login-account", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: cleanEmail, targetPortal: "seller" }),
-          });
-          const checkData = await checkRes.json();
-          if (!checkData.exists) {
-            setAccountNotFound(true);
-            addToast({
-              title: "Account Not Found",
-              description: "No account found with this email. Please create an account first.",
-              type: "error"
-            });
-          } else {
-            addToast({ title: "Error", description: error.message, type: "error" });
-          }
-        } catch {
-          addToast({ title: "Error", description: error.message, type: "error" });
-        }
-      } else {
         setAccountNotFound(false);
         setIncorrectCredentials(false);
-        setShowOTPVerification(true);
+        setIsSigningIn(true);
+        await routeSeller(authData.user!.id, authData);
+      } else {
+        // OTP Login Request
+        const { error } = await supabase.auth.signInWithOtp({
+          email: cleanEmail,
+          options: { shouldCreateUser: false }
+        });
+        if (error) {
+          try {
+            const checkRes = await fetch("/api/auth/validate-login-account", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email: cleanEmail, targetPortal: "seller" }),
+            });
+            const checkData = await checkRes.json();
+            if (!checkData.exists) {
+              setAccountNotFound(true);
+              addToast({
+                title: "Account Not Found",
+                description: "No account found with this email. Please create an account first.",
+                type: "error"
+              });
+            } else {
+              addToast({ title: "Error", description: error.message, type: "error" });
+            }
+          } catch {
+            addToast({ title: "Error", description: error.message, type: "error" });
+          }
+        } else {
+          setAccountNotFound(false);
+          setIncorrectCredentials(false);
+          setShowOTPVerification(true);
+        }
       }
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
@@ -231,39 +232,41 @@ function SellerLoginContent() {
     setAccountNotFound(false);
 
     try {
-      const checkRes = await fetch("/api/auth/validate-login-account", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: cleanEmail, targetPortal: "seller" }),
-      });
-      const checkData = await checkRes.json();
-      if (!checkData.exists) {
-        setAccountNotFound(true);
-        addToast({
-          title: "Account Not Found",
-          description: "No account found with this email. Please create an account first.",
-          type: "error"
+      try {
+        const checkRes = await fetch("/api/auth/validate-login-account", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: cleanEmail, targetPortal: "seller" }),
         });
-        setIsLoading(false);
-        return;
+        const checkData = await checkRes.json();
+        if (!checkData.exists) {
+          setAccountNotFound(true);
+          addToast({
+            title: "Account Not Found",
+            description: "No account found with this email. Please create an account first.",
+            type: "error"
+          });
+          return;
+        }
+      } catch {
+        // Proceed
       }
-    } catch {
-      // Proceed
-    }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
 
-    if (error) {
-      addToast({ title: "Password Reset Request Failed", description: error.message, type: "error" });
-    } else {
-      setIsRecoveryOTP(true);
-      addToast({
-        title: "Recovery Code Dispatched",
-        description: "A 6-digit recovery code has been sent to your seller email.",
-        type: "success"
-      });
+      if (error) {
+        addToast({ title: "Password Reset Request Failed", description: error.message, type: "error" });
+      } else {
+        setIsRecoveryOTP(true);
+        addToast({
+          title: "Recovery Code Dispatched",
+          description: "A 6-digit recovery code has been sent to your seller email.",
+          type: "success"
+        });
+      }
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   // Immediate full-page signing-in state while role authorization & navigation completes
@@ -399,7 +402,7 @@ function SellerLoginContent() {
                         </div>
                       </div>
 
-                      <Button variant="primary" size="lg" type="submit" isLoading={isLoading} className="w-full h-11 sm:h-12 font-semibold text-sm rounded-xl mt-1">
+                      <Button variant="primary" size="lg" type="submit" isLoading={isLoading} loadingText="Sending OTP..." className="w-full h-11 sm:h-12 font-semibold text-sm rounded-xl mt-1">
                         Send Recovery Code
                       </Button>
 
@@ -582,7 +585,8 @@ function SellerLoginContent() {
                   size="lg"
                   type="submit"
                   isLoading={isLoading}
-                  disabled={isLoading}
+                  loadingText={loginMethod === "password" ? "Signing in..." : "Sending OTP..."}
+                  disabled={isLoading || isSigningIn}
                   className="w-full mt-2 h-11 sm:h-12 font-semibold text-sm rounded-xl shadow-sm"
                 >
                   {loginMethod === "password" ? "Sign In" : "Send Login Code"}

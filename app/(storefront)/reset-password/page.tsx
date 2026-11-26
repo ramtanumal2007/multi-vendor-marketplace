@@ -342,7 +342,8 @@ export default function ResetPasswordPage() {
                   size="lg"
                   type="submit"
                   isLoading={isLoading}
-                  disabled={!isFormValid}
+                  loadingText="Updating password..."
+                  disabled={!isFormValid || isLoading}
                   className="w-full h-11 sm:h-12 font-semibold text-sm rounded-xl mt-1"
                 >
                   Update Password
